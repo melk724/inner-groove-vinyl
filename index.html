@@ -178,6 +178,10 @@ const { useState, useEffect, useMemo, useRef, useCallback } = React;
 const SUPABASE_URL  = 'https://gyrfthjhacvoyhfilnjc.supabase.co';
 const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd5cmZ0aGpoYWN2b3loZmlsbmpjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMwMTE1MjMsImV4cCI6MjA4ODU4NzUyM30.cI2df-xYe2X-LzC2L4mrtbuhWasAR7tAEOi9qSY9_rM';
 
+// Admin route config — only used on /admin
+const ADMIN_PIN          = '15147';
+const DISCOGS_LOOKUP_URL = `${SUPABASE_URL}/functions/v1/discogs-lookup`;
+
 const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON, {
   auth: { persistSession: false },
 });
@@ -979,6 +983,838 @@ function WishlistAddForm({ onClose, onAdded }) {
 }
 
 // ============================================================================
+// ADMIN APP — staff-only, lives at /admin
+// ============================================================================
+
+/** Simple session-based gate. PIN check stored in sessionStorage so each new
+ *  tab/closed-browser requires re-auth, but a refresh doesn't kick you out. */
+function PinGate({ onUnlock }) {
+  const [pin, setPin] = useState('');
+  const [err, setErr] = useState('');
+  const [shake, setShake] = useState(false);
+
+  const submit = (e) => {
+    e?.preventDefault?.();
+    if (pin === ADMIN_PIN) {
+      try { sessionStorage.setItem('igb_vinyl_admin_unlocked', '1'); } catch {}
+      onUnlock();
+    } else {
+      setErr('Wrong PIN');
+      setShake(true);
+      setTimeout(() => setShake(false), 400);
+      setPin('');
+    }
+  };
+
+  return (
+    <div className="min-h-screen flex items-center justify-center px-6">
+      <form onSubmit={submit} className={`w-full max-w-xs ${shake ? 'vote-bump' : ''}`}>
+        <div className="text-center mb-6">
+          <div className="font-mono text-[10px] tracking-[0.25em] text-[var(--text-faint)] uppercase mb-1">
+            Inner Groove · Staff Only
+          </div>
+          <h1 className="font-display text-4xl glow-pulse leading-none">Vinyl Admin</h1>
+        </div>
+        <input
+          type="password"
+          inputMode="numeric"
+          autoFocus
+          value={pin}
+          onChange={(e) => { setPin(e.target.value); setErr(''); }}
+          placeholder="PIN"
+          className="w-full text-center font-mono text-2xl bg-[var(--bg-elev)] border border-[var(--line)] rounded-lg px-4 py-3 text-[var(--text)] placeholder:text-[var(--text-faint)] focus:outline-none focus:border-[var(--hop)] focus:ring-1 focus:ring-[var(--hop)] tracking-[0.5em]"
+        />
+        {err && <div className="text-center text-sm text-red-400 mt-2">{err}</div>}
+        <button
+          type="submit"
+          className="mt-4 w-full py-3 rounded-lg bg-[var(--hop)] text-[#0a1a02] font-display text-xl tracking-wider hover:brightness-110 transition shadow-[0_0_24px_var(--hop-glow)]"
+        >
+          Unlock
+        </button>
+        <a href="/" className="block text-center text-xs text-[var(--text-faint)] hover:text-[var(--text-dim)] mt-4 underline">
+          Back to patron view
+        </a>
+      </form>
+    </div>
+  );
+}
+
+function AdminHeader({ view, setView }) {
+  return (
+    <header className="sticky top-0 z-40 bg-[var(--bg)]/85 backdrop-blur-md border-b border-[var(--line)]">
+      <div className="max-w-3xl mx-auto px-4 pt-3 pb-0">
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <div className="font-mono text-[10px] tracking-[0.25em] text-[var(--text-faint)] uppercase">
+              IGB · Vinyl Admin
+            </div>
+            <h1 className="font-display text-3xl glow-pulse leading-none">Stack Manager</h1>
+          </div>
+          <button
+            onClick={() => {
+              try { sessionStorage.removeItem('igb_vinyl_admin_unlocked'); } catch {}
+              window.location.reload();
+            }}
+            className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-faint)] hover:text-[var(--text-dim)]"
+          >
+            Lock
+          </button>
+        </div>
+        <nav className="flex gap-5 -mb-px overflow-x-auto">
+          {[
+            ['scan',     'Scan'],
+            ['manual',   'Add manually'],
+            ['inventory','Manage'],
+            ['wishlist', 'Wishlist'],
+          ].map(([k, label]) => (
+            <button
+              key={k}
+              onClick={() => setView(k)}
+              className={`font-display text-lg pb-2 px-1 transition-colors whitespace-nowrap ${
+                view === k ? 'tab-active' : 'text-[var(--text-dim)] hover:text-[var(--text)]'
+              }`}>
+              {label}
+            </button>
+          ))}
+        </nav>
+      </div>
+    </header>
+  );
+}
+
+// ----------------------------------------------------------------------------
+// SCAN VIEW — phone camera + barcode detection + Discogs lookup + save
+// ----------------------------------------------------------------------------
+function ScanView() {
+  const videoRef     = useRef(null);
+  const streamRef    = useRef(null);
+  const detectorRef  = useRef(null);
+  const scanningRef  = useRef(false);
+  const lastScanRef  = useRef(0);
+
+  const [supported,   setSupported]   = useState(true);
+  const [scanning,    setScanning]    = useState(false);
+  const [lookingUp,   setLookingUp]   = useState(false);
+  const [preview,     setPreview]     = useState(null);  // { record, alternates, barcode }
+  const [error,       setError]       = useState('');
+  const [manualBarcode, setManualBarcode] = useState('');
+  const [savedFlash,  setSavedFlash]  = useState(null);
+
+  // Check BarcodeDetector support up front
+  useEffect(() => {
+    if (typeof window.BarcodeDetector === 'undefined') {
+      setSupported(false);
+    }
+  }, []);
+
+  const stopCamera = useCallback(() => {
+    scanningRef.current = false;
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+    setScanning(false);
+  }, []);
+
+  const startCamera = useCallback(async () => {
+    setError('');
+    setPreview(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' } },
+        audio: false,
+      });
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
+      }
+      setScanning(true);
+
+      // Initialize detector — UPC-A and EAN-13 are the vinyl-relevant formats
+      detectorRef.current = new window.BarcodeDetector({
+        formats: ['upc_a', 'ean_13', 'ean_8', 'upc_e', 'code_128'],
+      });
+      scanningRef.current = true;
+      scanLoop();
+    } catch (err) {
+      setError(`Camera error: ${err.message || err}. Try manual entry.`);
+      setScanning(false);
+    }
+  }, []);
+
+  const scanLoop = async () => {
+    if (!scanningRef.current || !videoRef.current || !detectorRef.current) return;
+    try {
+      const codes = await detectorRef.current.detect(videoRef.current);
+      if (codes.length > 0) {
+        const now = Date.now();
+        // Debounce: ignore if we just scanned the same code
+        if (now - lastScanRef.current > 1500) {
+          lastScanRef.current = now;
+          const value = codes[0].rawValue;
+          if (navigator.vibrate) navigator.vibrate(100);
+          await handleBarcode(value);
+        }
+      }
+    } catch {
+      // Detection errors are normal mid-frame; just continue
+    }
+    if (scanningRef.current) {
+      requestAnimationFrame(scanLoop);
+    }
+  };
+
+  const handleBarcode = async (barcode) => {
+    setLookingUp(true);
+    setError('');
+    try {
+      const res = await fetch(
+        `${DISCOGS_LOOKUP_URL}?barcode=${encodeURIComponent(barcode)}`,
+        { headers: { 'Authorization': `Bearer ${SUPABASE_ANON}`, 'apikey': SUPABASE_ANON } },
+      );
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      if (!data.found) {
+        setError(`No Discogs match for barcode ${barcode}. Try manual entry.`);
+        setLookingUp(false);
+        return;
+      }
+      setPreview({ ...data, barcode });
+    } catch (err) {
+      setError(`Lookup failed: ${err.message}`);
+    } finally {
+      setLookingUp(false);
+    }
+  };
+
+  const handleManualBarcode = (e) => {
+    e?.preventDefault?.();
+    if (manualBarcode.trim()) handleBarcode(manualBarcode.trim());
+  };
+
+  const saveRecord = async () => {
+    if (!preview) return;
+    const r = preview.record;
+    const { error: e } = await supabase.from('vinyl_inventory').insert({
+      artist:           r.artist,
+      album:            r.album,
+      discogs_id:       r.discogs_id,
+      discogs_url:      r.discogs_url,
+      cover_url:        r.cover_url,
+      year:             r.year,
+      genres:           r.genres,
+      styles:           r.styles,
+      tracklist:        r.tracklist,
+      sides:            r.sides,
+      barcode:          preview.barcode || null,
+      match_confidence: 'confirmed',
+      created_by:       'admin-scan',
+    });
+    if (e) {
+      // Unique constraint hit on discogs_id = already in collection
+      if (e.code === '23505') {
+        setError(`That record (Discogs ID ${r.discogs_id}) is already in the collection.`);
+      } else {
+        setError(`Save failed: ${e.message}`);
+      }
+      return;
+    }
+    setSavedFlash(r.album);
+    setTimeout(() => setSavedFlash(null), 2200);
+    setPreview(null);
+    // Camera is still running — they can scan the next one immediately
+  };
+
+  const rejectAndRescan = () => {
+    setPreview(null);
+    setError('');
+  };
+
+  // Cleanup on unmount
+  useEffect(() => () => stopCamera(), [stopCamera]);
+
+  return (
+    <div className="max-w-2xl mx-auto px-4 py-4">
+      {savedFlash && (
+        <div className="mb-3 p-3 rounded-lg border border-[var(--hop-deep)] bg-[#6dc13520] text-[var(--hop)] font-mono text-sm">
+          ✓ Saved: {savedFlash}
+        </div>
+      )}
+
+      {!supported && (
+        <div className="mb-4 p-3 rounded-lg border border-[var(--warn)] bg-[#fbbf2410] text-[var(--warn)] text-sm">
+          Your browser doesn't support live barcode scanning. Use Chrome on Android, or
+          enter the barcode manually below. (Safari on iOS supports scanning starting in iOS 17.)
+        </div>
+      )}
+
+      {/* Camera area */}
+      <div className="relative aspect-[3/4] sm:aspect-video bg-black rounded-lg overflow-hidden border border-[var(--line)]">
+        <video
+          ref={videoRef}
+          playsInline
+          muted
+          className={`w-full h-full object-cover ${scanning ? '' : 'opacity-0'}`}
+        />
+        {!scanning && !preview && (
+          <div className="absolute inset-0 flex items-center justify-center flex-col gap-3 text-center px-6">
+            <VinylSpinner size={64} />
+            <div className="font-display text-2xl text-[var(--text-dim)]">Camera off</div>
+            <div className="text-xs text-[var(--text-faint)] max-w-xs">
+              Point the camera at the barcode on the back of the record sleeve.
+            </div>
+          </div>
+        )}
+        {/* Scan reticle overlay */}
+        {scanning && !lookingUp && !preview && (
+          <>
+            <div className="absolute inset-0 pointer-events-none">
+              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-3/4 h-1/3 border-2 border-[var(--hop)] rounded-md shadow-[0_0_24px_var(--hop-glow)]" />
+            </div>
+            <div className="absolute bottom-3 left-0 right-0 text-center font-mono text-[11px] uppercase tracking-wider text-[var(--hop)]">
+              ◉ Looking for a barcode…
+            </div>
+          </>
+        )}
+        {lookingUp && (
+          <div className="absolute inset-0 flex items-center justify-center flex-col gap-3 bg-black/80">
+            <VinylSpinner size={56} />
+            <div className="font-display text-xl text-[var(--hop)]">Looking up…</div>
+          </div>
+        )}
+      </div>
+
+      {/* Camera controls */}
+      <div className="mt-3 flex gap-2">
+        {!scanning ? (
+          <button
+            onClick={startCamera}
+            disabled={!supported}
+            className="flex-1 py-3 rounded-lg bg-[var(--hop)] text-[#0a1a02] font-display text-xl tracking-wider hover:brightness-110 disabled:opacity-40 disabled:cursor-not-allowed transition shadow-[0_0_24px_var(--hop-glow)]"
+          >
+            Start camera
+          </button>
+        ) : (
+          <button
+            onClick={stopCamera}
+            className="flex-1 py-3 rounded-lg border border-[var(--line)] text-[var(--text-dim)] font-display text-xl tracking-wider hover:border-[var(--text-faint)] transition"
+          >
+            Stop camera
+          </button>
+        )}
+      </div>
+
+      {error && (
+        <div className="mt-3 p-3 rounded-lg border border-red-700 bg-red-900/20 text-red-300 text-sm">
+          {error}
+        </div>
+      )}
+
+      {/* Manual barcode entry — works even without camera support */}
+      <form onSubmit={handleManualBarcode} className="mt-4 flex gap-2">
+        <input
+          value={manualBarcode}
+          onChange={(e) => setManualBarcode(e.target.value)}
+          placeholder="Or type barcode manually"
+          inputMode="numeric"
+          className="flex-1 bg-[var(--bg-elev)] border border-[var(--line)] rounded-lg px-3 py-2 text-[var(--text)] placeholder:text-[var(--text-faint)] focus:outline-none focus:border-[var(--hop)]"
+        />
+        <button
+          type="submit"
+          disabled={!manualBarcode.trim() || lookingUp}
+          className="px-4 py-2 rounded-lg border border-[var(--hop)] text-[var(--hop)] font-display text-lg disabled:opacity-40 hover:bg-[#6dc13520] transition"
+        >
+          Look up
+        </button>
+      </form>
+
+      {/* Preview / confirm */}
+      {preview && (
+        <ScanPreview
+          preview={preview}
+          onSave={saveRecord}
+          onReject={rejectAndRescan}
+        />
+      )}
+    </div>
+  );
+}
+
+function ScanPreview({ preview, onSave, onReject }) {
+  const r = preview.record;
+  return (
+    <div className="mt-4 p-4 rounded-lg border border-[var(--hop)] bg-[var(--bg-elev)] shadow-[0_0_32px_var(--hop-glow)] sheet-anim">
+      <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--hop)] mb-2">
+        ◉ Match found · barcode {preview.barcode}
+      </div>
+      <div className="flex gap-3">
+        <div className="w-24 sm:w-32 flex-shrink-0">
+          <div className="cover-frame rounded border border-[var(--line)]">
+            <CoverImage src={r.cover_url} alt={`${r.artist} - ${r.album}`} />
+          </div>
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-faint)]">
+            {r.year || '—'}{r.year && r.genres?.length ? ' · ' : ''}{(r.genres || []).slice(0, 2).join(' · ')}
+          </div>
+          <div className="font-display text-2xl text-[var(--text)] leading-none mt-1">
+            {clean(r.album)}
+          </div>
+          <div className="text-[var(--text-dim)] mt-0.5">{clean(r.artist)}</div>
+          <div className="font-mono text-[10px] text-[var(--text-faint)] mt-2">
+            {r.tracklist?.length || 0} tracks · {r.sides?.length || 0} sides ({(r.sides || []).join('/')})
+          </div>
+          {r.discogs_url && (
+            <a href={r.discogs_url} target="_blank" rel="noopener noreferrer"
+               className="text-[11px] font-mono text-[var(--text-dim)] hover:text-[var(--hop)] underline">
+              View on Discogs ↗
+            </a>
+          )}
+        </div>
+      </div>
+      <div className="flex gap-2 mt-4">
+        <button
+          onClick={onReject}
+          className="flex-1 py-2.5 rounded-lg border border-[var(--line)] text-[var(--text-dim)] font-display text-lg tracking-wider hover:border-red-600 hover:text-red-400 transition"
+        >
+          Wrong record
+        </button>
+        <button
+          onClick={onSave}
+          className="flex-1 py-2.5 rounded-lg bg-[var(--hop)] text-[#0a1a02] font-display text-lg tracking-wider hover:brightness-110 transition"
+        >
+          Save to inventory
+        </button>
+      </div>
+      {preview.alternates?.length > 0 && (
+        <details className="mt-3 text-[12px]">
+          <summary className="cursor-pointer text-[var(--text-faint)] hover:text-[var(--text-dim)]">
+            {preview.alternates.length} other matches
+          </summary>
+          <ul className="mt-2 space-y-1">
+            {preview.alternates.map((a) => (
+              <li key={a.discogs_id} className="text-[var(--text-faint)]">
+                · {a.title} {a.year && `(${a.year})`} {a.country && `· ${a.country}`}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+    </div>
+  );
+}
+
+// ----------------------------------------------------------------------------
+// MANUAL VIEW — for older records without barcodes, or barcode misses
+// ----------------------------------------------------------------------------
+function ManualView() {
+  const [artist, setArtist] = useState('');
+  const [album,  setAlbum]  = useState('');
+  const [lookingUp, setLookingUp] = useState(false);
+  const [preview, setPreview] = useState(null);
+  const [error, setError] = useState('');
+  const [saved, setSaved] = useState(null);
+
+  const lookup = async (e) => {
+    e?.preventDefault?.();
+    if (!artist.trim() || !album.trim()) {
+      setError('Both artist and album required.');
+      return;
+    }
+    setLookingUp(true);
+    setError('');
+    try {
+      const params = new URLSearchParams({ artist: artist.trim(), album: album.trim() });
+      const res = await fetch(`${DISCOGS_LOOKUP_URL}?${params}`, {
+        headers: { 'Authorization': `Bearer ${SUPABASE_ANON}`, 'apikey': SUPABASE_ANON },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      if (!data.found) {
+        // Offer to save with no enrichment
+        setPreview({ record: { artist: artist.trim(), album: album.trim() }, found: false });
+      } else {
+        setPreview({ ...data, found: true });
+      }
+    } catch (err) {
+      setError(`Lookup failed: ${err.message}`);
+    } finally {
+      setLookingUp(false);
+    }
+  };
+
+  const save = async () => {
+    if (!preview) return;
+    const r = preview.record;
+    const { error: e } = await supabase.from('vinyl_inventory').insert({
+      artist:           r.artist,
+      album:            r.album,
+      discogs_id:       r.discogs_id ?? null,
+      discogs_url:      r.discogs_url ?? null,
+      cover_url:        r.cover_url ?? null,
+      year:             r.year ?? null,
+      genres:           r.genres ?? [],
+      styles:           r.styles ?? [],
+      tracklist:        r.tracklist ?? null,
+      sides:            r.sides ?? [],
+      match_confidence: preview.found ? 'confirmed' : 'unmatched',
+      created_by:       'admin-manual',
+    });
+    if (e) {
+      if (e.code === '23505') {
+        setError(`That Discogs ID is already in the collection.`);
+      } else {
+        setError(`Save failed: ${e.message}`);
+      }
+      return;
+    }
+    setSaved(r.album);
+    setTimeout(() => setSaved(null), 2200);
+    setArtist(''); setAlbum(''); setPreview(null);
+  };
+
+  return (
+    <div className="max-w-xl mx-auto px-4 py-4">
+      {saved && (
+        <div className="mb-3 p-3 rounded-lg border border-[var(--hop-deep)] bg-[#6dc13520] text-[var(--hop)] font-mono text-sm">
+          ✓ Saved: {saved}
+        </div>
+      )}
+
+      <form onSubmit={lookup} className="space-y-3">
+        <label className="block">
+          <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-faint)]">Artist</span>
+          <input
+            value={artist} onChange={(e) => setArtist(e.target.value)}
+            placeholder="e.g. Pink Floyd"
+            className="mt-1 w-full bg-[var(--bg-elev)] border border-[var(--line)] rounded-md px-3 py-2 text-[var(--text)] placeholder:text-[var(--text-faint)] focus:outline-none focus:border-[var(--hop)]"
+          />
+        </label>
+        <label className="block">
+          <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-faint)]">Album</span>
+          <input
+            value={album} onChange={(e) => setAlbum(e.target.value)}
+            placeholder="e.g. The Dark Side of the Moon"
+            className="mt-1 w-full bg-[var(--bg-elev)] border border-[var(--line)] rounded-md px-3 py-2 text-[var(--text)] placeholder:text-[var(--text-faint)] focus:outline-none focus:border-[var(--hop)]"
+          />
+        </label>
+        <button
+          type="submit" disabled={lookingUp}
+          className="w-full py-3 rounded-lg bg-[var(--hop)] text-[#0a1a02] font-display text-xl tracking-wider hover:brightness-110 disabled:opacity-50 transition"
+        >
+          {lookingUp ? 'Looking up…' : 'Look up on Discogs'}
+        </button>
+      </form>
+
+      {error && (
+        <div className="mt-3 p-3 rounded-lg border border-red-700 bg-red-900/20 text-red-300 text-sm">
+          {error}
+        </div>
+      )}
+
+      {preview && preview.found && (
+        <ScanPreview preview={preview} onSave={save} onReject={() => setPreview(null)} />
+      )}
+
+      {preview && !preview.found && (
+        <div className="mt-4 p-4 rounded-lg border border-[var(--warn)] bg-[#fbbf2410] sheet-anim">
+          <div className="font-mono text-[10px] uppercase tracking-wider text-[var(--warn)] mb-2">
+            ◉ No Discogs match
+          </div>
+          <p className="text-sm text-[var(--text-dim)]">
+            Couldn't find <strong className="text-[var(--text)]">{preview.record.artist} — {preview.record.album}</strong> on Discogs.
+            Save it anyway with just the artist and album name? (No cover art or tracklist will appear in the patron view.)
+          </p>
+          <div className="flex gap-2 mt-3">
+            <button onClick={() => setPreview(null)}
+              className="flex-1 py-2 rounded-lg border border-[var(--line)] text-[var(--text-dim)] font-display tracking-wider hover:border-[var(--text-faint)]">
+              Cancel
+            </button>
+            <button onClick={save}
+              className="flex-1 py-2 rounded-lg bg-[var(--warn)] text-[#1a1303] font-display tracking-wider hover:brightness-110">
+              Save anyway
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ----------------------------------------------------------------------------
+// INVENTORY VIEW — list, filter, edit status, delete
+// ----------------------------------------------------------------------------
+function InventoryView() {
+  const [items, setItems]     = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [query, setQuery]     = useState('');
+  const [editing, setEditing] = useState(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const { data, error } = await supabase
+      .from('vinyl_inventory')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (error) console.error(error);
+    setItems(data || []);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const filtered = useMemo(() => {
+    if (!query.trim()) return items;
+    const q = query.toLowerCase();
+    return items.filter((r) =>
+      r.artist?.toLowerCase().includes(q) || r.album?.toLowerCase().includes(q)
+    );
+  }, [items, query]);
+
+  return (
+    <div className="max-w-3xl mx-auto px-4 py-4">
+      <div className="relative mb-3">
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search inventory…"
+          className="w-full bg-[var(--bg-elev)] border border-[var(--line)] rounded-lg px-4 py-2 text-[var(--text)] placeholder:text-[var(--text-faint)] focus:outline-none focus:border-[var(--hop)]"
+        />
+      </div>
+      <div className="font-mono text-[11px] uppercase tracking-wider text-[var(--text-faint)] mb-3">
+        {loading ? 'Loading…' : `${filtered.length} of ${items.length} records`}
+      </div>
+
+      {loading ? (
+        <div className="flex items-center justify-center py-12"><VinylSpinner /></div>
+      ) : (
+        <ul className="space-y-1.5">
+          {filtered.map((r) => (
+            <li key={r.id}
+              className="flex items-center gap-3 p-2 rounded border border-[var(--line)] bg-[var(--bg-elev)] hover:border-[var(--text-faint)] transition">
+              <div className="w-12 h-12 flex-shrink-0 rounded overflow-hidden bg-[var(--bg-card)]">
+                <CoverImage src={r.cover_url} alt={r.album} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-semibold text-[var(--text)] truncate">{clean(r.album)}</div>
+                <div className="text-xs text-[var(--text-dim)] truncate">{clean(r.artist)}{r.year ? ` · ${r.year}` : ''}</div>
+              </div>
+              {r.status && r.status !== 'available' && (
+                <StatusPill status={r.status} />
+              )}
+              <button
+                onClick={() => setEditing(r)}
+                className="font-mono text-[10px] uppercase tracking-wider px-2 py-1 rounded text-[var(--text-dim)] hover:text-[var(--hop)] hover:bg-[#6dc13510]"
+              >
+                Edit
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {editing && <EditRecord record={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} />}
+    </div>
+  );
+}
+
+function EditRecord({ record, onClose, onSaved }) {
+  const [status, setStatus] = useState(record.status || 'available');
+  const [notes,  setNotes]  = useState(record.notes || '');
+  const [saving, setSaving] = useState(false);
+  const [error,  setError]  = useState('');
+
+  const save = async () => {
+    setSaving(true);
+    setError('');
+    const { error: e } = await supabase
+      .from('vinyl_inventory')
+      .update({ status, notes: notes.trim() || null })
+      .eq('id', record.id);
+    setSaving(false);
+    if (e) { setError(e.message); return; }
+    onSaved();
+  };
+
+  const remove = async () => {
+    if (!confirm(`Remove "${record.album}" by ${record.artist} from the collection?`)) return;
+    setSaving(true);
+    const { error: e } = await supabase.from('vinyl_inventory').delete().eq('id', record.id);
+    setSaving(false);
+    if (e) { setError(e.message); return; }
+    onSaved();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center scrim-anim"
+      style={{ background: 'rgba(0,0,0,0.78)', backdropFilter: 'blur(4px)' }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="sheet-anim bg-[var(--bg-elev)] border-t sm:border border-[var(--line)] rounded-t-2xl sm:rounded-2xl w-full sm:max-w-md p-5 safe-bottom">
+        <div className="flex items-start gap-3 mb-4">
+          <div className="w-16 h-16 flex-shrink-0 rounded overflow-hidden">
+            <CoverImage src={record.cover_url} alt={record.album} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="font-display text-xl text-[var(--text)] leading-none">{clean(record.album)}</div>
+            <div className="text-sm text-[var(--text-dim)] mt-1">{clean(record.artist)}</div>
+          </div>
+          <button onClick={onClose} className="text-[var(--text-dim)] hover:text-[var(--text)] text-2xl leading-none">×</button>
+        </div>
+
+        <label className="block mb-3">
+          <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-faint)]">Status</span>
+          <select value={status} onChange={(e) => setStatus(e.target.value)}
+            className="mt-1 w-full bg-[var(--bg)] border border-[var(--line)] rounded-md px-3 py-2 text-[var(--text)] focus:outline-none focus:border-[var(--hop)]">
+            <option value="available">Available</option>
+            <option value="playing">On the deck</option>
+            <option value="featured">★ Featured</option>
+            <option value="damaged">Damaged</option>
+            <option value="missing">Missing</option>
+          </select>
+        </label>
+
+        <label className="block mb-4">
+          <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-faint)]">Staff notes</span>
+          <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2}
+            placeholder="Bin location, condition, etc."
+            className="mt-1 w-full bg-[var(--bg)] border border-[var(--line)] rounded-md px-3 py-2 text-[var(--text)] placeholder:text-[var(--text-faint)] focus:outline-none focus:border-[var(--hop)] resize-none" />
+        </label>
+
+        {error && <div className="text-sm text-red-400 mb-3">{error}</div>}
+
+        <div className="flex gap-2">
+          <button onClick={remove} disabled={saving}
+            className="px-3 py-2 rounded-lg border border-red-800 text-red-400 font-mono text-[11px] uppercase tracking-wider hover:bg-red-900/20 disabled:opacity-50">
+            Delete
+          </button>
+          <button onClick={onClose} className="flex-1 py-2 rounded-lg border border-[var(--line)] text-[var(--text-dim)] font-display tracking-wider">
+            Cancel
+          </button>
+          <button onClick={save} disabled={saving}
+            className="flex-1 py-2 rounded-lg bg-[var(--hop)] text-[#0a1a02] font-display tracking-wider hover:brightness-110 disabled:opacity-50">
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ----------------------------------------------------------------------------
+// WISHLIST ADMIN VIEW — promote to "ordered", mark "acquired", or decline
+// ----------------------------------------------------------------------------
+function WishlistAdminView() {
+  const [items, setItems]     = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const { data, error } = await supabase
+      .from('vinyl_wishlist')
+      .select('*')
+      .order('vote_count', { ascending: false });
+    if (error) console.error(error);
+    setItems(data || []);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const setStatus = async (item, status) => {
+    const { error } = await supabase.from('vinyl_wishlist').update({ status }).eq('id', item.id);
+    if (error) { alert(error.message); return; }
+    load();
+  };
+
+  return (
+    <div className="max-w-3xl mx-auto px-4 py-4">
+      <div className="font-mono text-[11px] uppercase tracking-wider text-[var(--text-faint)] mb-3">
+        {loading ? 'Loading…' : `${items.length} requests`}
+      </div>
+      {loading ? (
+        <div className="flex items-center justify-center py-12"><VinylSpinner /></div>
+      ) : items.length === 0 ? (
+        <div className="text-center text-[var(--text-faint)] py-12">No wishlist items yet.</div>
+      ) : (
+        <ul className="space-y-2">
+          {items.map((it) => (
+            <li key={it.id} className="p-3 rounded-lg border border-[var(--line)] bg-[var(--bg-elev)]">
+              <div className="flex items-start gap-3">
+                <div className="font-display text-2xl text-[var(--hop)] leading-none w-10 text-center">{it.vote_count}</div>
+                <div className="flex-1 min-w-0">
+                  <div className="font-semibold text-[var(--text)]">{clean(it.album)}</div>
+                  <div className="text-sm text-[var(--text-dim)]">{clean(it.artist)}</div>
+                  {it.note && <div className="text-[11px] italic text-[var(--text-faint)] mt-1">"{it.note}"{it.submitted_by ? ` — ${it.submitted_by}` : ''}</div>}
+                  <div className="font-mono text-[10px] uppercase tracking-wider mt-2">
+                    Status: <span className="text-[var(--text-dim)]">{it.status}</span>
+                  </div>
+                </div>
+              </div>
+              <div className="flex gap-2 mt-3 flex-wrap">
+                {it.status !== 'open' && (
+                  <button onClick={() => setStatus(it, 'open')}
+                    className="text-[10px] font-mono uppercase tracking-wider px-2 py-1 rounded border border-[var(--line)] text-[var(--text-dim)] hover:border-[var(--text-faint)]">
+                    Reopen
+                  </button>
+                )}
+                {it.status !== 'ordered' && (
+                  <button onClick={() => setStatus(it, 'ordered')}
+                    className="text-[10px] font-mono uppercase tracking-wider px-2 py-1 rounded border border-[var(--warn)] text-[var(--warn)] hover:bg-[#fbbf2410]">
+                    Mark ordered
+                  </button>
+                )}
+                {it.status !== 'acquired' && (
+                  <button onClick={() => setStatus(it, 'acquired')}
+                    className="text-[10px] font-mono uppercase tracking-wider px-2 py-1 rounded border border-[var(--hop)] text-[var(--hop)] hover:bg-[#6dc13510]">
+                    Mark acquired
+                  </button>
+                )}
+                {it.status !== 'declined' && (
+                  <button onClick={() => setStatus(it, 'declined')}
+                    className="text-[10px] font-mono uppercase tracking-wider px-2 py-1 rounded border border-red-800 text-red-400 hover:bg-red-900/10">
+                    Decline
+                  </button>
+                )}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+// ----------------------------------------------------------------------------
+// ADMIN APP SHELL
+// ----------------------------------------------------------------------------
+function AdminApp() {
+  const [unlocked, setUnlocked] = useState(() => {
+    try { return sessionStorage.getItem('igb_vinyl_admin_unlocked') === '1'; }
+    catch { return false; }
+  });
+  const [view, setView] = useState('scan');
+
+  if (!unlocked) return <PinGate onUnlock={() => setUnlocked(true)} />;
+
+  return (
+    <>
+      <AdminHeader view={view} setView={setView} />
+      {view === 'scan'      && <ScanView />}
+      {view === 'manual'    && <ManualView />}
+      {view === 'inventory' && <InventoryView />}
+      {view === 'wishlist'  && <WishlistAdminView />}
+      <footer className="max-w-3xl mx-auto px-4 py-8 text-center font-mono text-[10px] tracking-[0.2em] uppercase text-[var(--text-faint)]">
+        Inner Groove Brewing · Staff Console
+      </footer>
+    </>
+  );
+}
+
+// ============================================================================
 // APP SHELL
 // ============================================================================
 function App() {
@@ -1017,7 +1853,11 @@ function App() {
 }
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
-root.render(<App />);
+
+// Route based on URL path. Vercel rewrites /admin → /index.html so we can
+// inspect window.location.pathname to decide which app to render.
+const isAdmin = window.location.pathname.replace(/\/$/, '') === '/admin';
+root.render(isAdmin ? <AdminApp /> : <App />);
 </script>
 </body>
 </html>
