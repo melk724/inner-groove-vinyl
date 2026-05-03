@@ -347,21 +347,14 @@ function Header({ tab, setTab }) {
               <img
                 src="/igb-logo.png"
                 alt="Inner Groove Brewing"
-                width={48}
-                height={36}
-                className="h-9 w-auto block"
+                className="h-12 sm:h-14 w-auto block"
               />
             </a>
-            <div className="min-w-0">
-              <div className="font-mono text-[10px] tracking-[0.25em] text-[var(--text-faint)] uppercase">
-                Inner Groove Brewing · Verona
-              </div>
-              <h1 className="font-display text-3xl sm:text-4xl glow-pulse leading-none">
-                The Stacks
-              </h1>
-            </div>
+            <h1 className="font-display text-3xl sm:text-4xl glow-pulse leading-none truncate">
+              The Stacks
+            </h1>
           </div>
-          <div className="text-right flex-shrink-0">
+          <div className="text-right flex-shrink-0 hidden sm:block">
             <div className="font-mono text-[10px] text-[var(--text-faint)] uppercase tracking-wider">
               Vinyl Collection
             </div>
