@@ -1,0 +1,1023 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="theme-color" content="#0a0a0a" />
+<title>Inner Groove · Vinyl Collection</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=JetBrains+Mono:wght@400;500&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+<style>
+  :root {
+    --hop:        #6dc135;
+    --hop-glow:   #6dc13580;
+    --hop-deep:   #4a8c1f;
+    --bg:         #0a0a0a;
+    --bg-elev:    #141414;
+    --bg-card:    #1a1a1a;
+    --line:       #262626;
+    --text:       #f5f5f5;
+    --text-dim:   #a3a3a3;
+    --text-faint: #525252;
+    --warn:       #fbbf24;
+    --venmo:      #3d95ce;
+  }
+
+  html, body { background: var(--bg); color: var(--text); }
+  body {
+    font-family: 'Inter', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    overscroll-behavior-y: none;
+    /* Subtle scanline texture for the CRT/turntable vibe */
+    background-image:
+      radial-gradient(ellipse 80% 50% at 50% -20%, #6dc13510 0%, transparent 60%),
+      repeating-linear-gradient(0deg, transparent 0px, transparent 2px, rgba(255,255,255,0.012) 2px, rgba(255,255,255,0.012) 3px);
+  }
+
+  .font-display { font-family: 'Bebas Neue', sans-serif; letter-spacing: 0.02em; }
+  .font-mono    { font-family: 'JetBrains Mono', monospace; }
+
+  /* Reused glowing-pulsing header from the DJ app */
+  @keyframes glow-pulse {
+    0%, 100% { text-shadow: 0 0 8px var(--hop-glow), 0 0 20px #6dc13540, 0 0 40px #6dc13520; }
+    50%      { text-shadow: 0 0 12px var(--hop), 0 0 28px #6dc13560, 0 0 60px #6dc13540; }
+  }
+  .glow-pulse { color: var(--hop); animation: glow-pulse 3s ease-in-out infinite; }
+
+  /* Vinyl-spin loader */
+  @keyframes spin-record { to { transform: rotate(360deg); } }
+  .spin-record { animation: spin-record 2.4s linear infinite; }
+
+  /* Stagger for grid load */
+  @keyframes fade-rise {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .fade-rise { animation: fade-rise 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+
+  /* Custom scrollbar — barely there */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--line); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--text-faint); }
+
+  /* Filter chips */
+  .chip {
+    display: inline-flex; align-items: center; gap: 0.375rem;
+    padding: 0.4rem 0.75rem;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--text-dim);
+    background: var(--bg-elev);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+  }
+  .chip:hover { border-color: var(--hop-deep); color: var(--text); }
+  .chip[data-active="true"] {
+    background: var(--hop);
+    border-color: var(--hop);
+    color: #0a1a02;
+    font-weight: 600;
+  }
+
+  /* Cover art frame */
+  .cover-frame {
+    position: relative;
+    aspect-ratio: 1;
+    background: var(--bg-elev);
+    overflow: hidden;
+  }
+  .cover-frame img {
+    width: 100%; height: 100%;
+    object-fit: cover;
+    transition: transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  .album-card:hover .cover-frame img { transform: scale(1.04); }
+  .album-card:hover .cover-frame::after {
+    opacity: 1;
+  }
+  .cover-frame::after {
+    content: '';
+    position: absolute; inset: 0;
+    background: linear-gradient(135deg, transparent 60%, var(--hop-glow));
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    pointer-events: none;
+  }
+
+  /* Tab underline */
+  .tab-active {
+    color: var(--hop);
+    border-bottom: 2px solid var(--hop);
+    box-shadow: 0 1px 0 0 var(--hop), 0 4px 24px -4px var(--hop-glow);
+  }
+
+  /* Side badge */
+  .side-badge {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 1.75rem; height: 1.75rem;
+    border-radius: 999px;
+    background: linear-gradient(135deg, var(--hop) 0%, var(--hop-deep) 100%);
+    color: #0a1a02;
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 1rem;
+    font-weight: 700;
+    box-shadow: 0 0 12px var(--hop-glow);
+  }
+
+  /* Sheet animation for modal */
+  @keyframes sheet-in {
+    from { opacity: 0; transform: translateY(20px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes scrim-in {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+  .sheet-anim { animation: sheet-in 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+  .scrim-anim { animation: scrim-in 0.2s ease both; }
+
+  /* Vote button bump */
+  @keyframes vote-bump {
+    0% { transform: scale(1); }
+    40% { transform: scale(1.18); }
+    100% { transform: scale(1); }
+  }
+  .vote-bump { animation: vote-bump 0.32s cubic-bezier(0.2, 0.8, 0.2, 1); }
+
+  /* Hide elements outside the safe area on iPhone */
+  .safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+
+  /* Status pill colors */
+  .pill-available { background: #6dc13520; color: var(--hop); border: 1px solid var(--hop-deep); }
+  .pill-playing   { background: #fbbf2420; color: var(--warn); border: 1px solid #b88820; }
+  .pill-damaged   { background: #ef444420; color: #f87171; border: 1px solid #b91c1c; }
+  .pill-missing   { background: #52525220; color: var(--text-dim); border: 1px solid var(--text-faint); }
+  .pill-featured  { background: linear-gradient(90deg, var(--hop) 0%, #fbbf24 100%); color: #0a0a0a; border: none; font-weight: 700; }
+</style>
+</head>
+<body>
+
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useMemo, useRef, useCallback } = React;
+
+// ============================================================================
+// CONFIG — these are PUBLIC values; safe to ship in the frontend
+// ============================================================================
+const SUPABASE_URL  = 'https://gyrfthjhacvoyhfilnjc.supabase.co';
+const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd5cmZ0aGpoYWN2b3loZmlsbmpjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMwMTE1MjMsImV4cCI6MjA4ODU4NzUyM30.cI2df-xYe2X-LzC2L4mrtbuhWasAR7tAEOi9qSY9_rM';
+
+const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON, {
+  auth: { persistSession: false },
+});
+
+// ============================================================================
+// HELPERS
+// ============================================================================
+
+/** Stable per-device voter ID for wishlist upvotes (honor system, like DJ app). */
+function getVoterId() {
+  let id;
+  try {
+    id = localStorage.getItem('igb_voter_id');
+    if (!id) {
+      id = crypto.randomUUID();
+      localStorage.setItem('igb_voter_id', id);
+    }
+  } catch {
+    // localStorage blocked — use an ephemeral id (votes won't persist across reloads)
+    id = 'ephemeral-' + Math.random().toString(36).slice(2);
+  }
+  return id;
+}
+
+/** Bucket a year into a decade label like "1970s". */
+function decadeOf(year) {
+  if (!year) return null;
+  const d = Math.floor(year / 10) * 10;
+  return `${d}s`;
+}
+
+/** Strip parenthetical suffixes from artist/album for cleaner display. */
+function clean(text) {
+  return (text || '').replace(/\s+/g, ' ').trim();
+}
+
+/** Compare strings for sort, case-insensitive, ignoring leading "The ". */
+function nameKey(s) {
+  return (s || '').toLowerCase().replace(/^the\s+/, '');
+}
+
+// ============================================================================
+// SHARED UI BITS
+// ============================================================================
+
+function VinylSpinner({ size = 64 }) {
+  return (
+    <div className="flex items-center justify-center" style={{ width: size, height: size }}>
+      <svg viewBox="0 0 64 64" width={size} height={size} className="spin-record">
+        <defs>
+          <radialGradient id="vinyl-grad" cx="50%" cy="50%" r="50%">
+            <stop offset="0%"  stopColor="#1a1a1a" />
+            <stop offset="60%" stopColor="#0a0a0a" />
+            <stop offset="100%" stopColor="#000" />
+          </radialGradient>
+        </defs>
+        <circle cx="32" cy="32" r="30" fill="url(#vinyl-grad)" />
+        {[28, 24, 20, 16].map((r) => (
+          <circle key={r} cx="32" cy="32" r={r} fill="none" stroke="#262626" strokeWidth="0.5" />
+        ))}
+        <circle cx="32" cy="32" r="10" fill="#6dc135" />
+        <circle cx="32" cy="32" r="2"  fill="#0a0a0a" />
+        <circle cx="32" cy="22" r="0.8" fill="#6dc135" opacity="0.8" />
+      </svg>
+    </div>
+  );
+}
+
+function StatusPill({ status }) {
+  const map = {
+    available: { label: 'Available',  cls: 'pill-available' },
+    playing:   { label: 'On the deck',cls: 'pill-playing'   },
+    damaged:   { label: 'Damaged',    cls: 'pill-damaged'   },
+    missing:   { label: 'Missing',    cls: 'pill-missing'   },
+    featured:  { label: '★ Featured', cls: 'pill-featured'  },
+  };
+  const s = map[status] || map.available;
+  if (status === 'available') return null; // default; no need to clutter
+  return (
+    <span className={`text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded ${s.cls}`}>
+      {s.label}
+    </span>
+  );
+}
+
+function CoverImage({ src, alt }) {
+  const [errored, setErrored] = useState(false);
+  if (!src || errored) {
+    // Fallback: vinyl glyph
+    return (
+      <div className="w-full h-full flex items-center justify-center bg-neutral-900">
+        <VinylSpinner size={48} />
+      </div>
+    );
+  }
+  return <img src={src} alt={alt} loading="lazy" onError={() => setErrored(true)} />;
+}
+
+// ============================================================================
+// HEADER + NAV
+// ============================================================================
+function Header({ tab, setTab }) {
+  return (
+    <header className="sticky top-0 z-40 bg-[var(--bg)]/85 backdrop-blur-md border-b border-[var(--line)]">
+      <div className="max-w-5xl mx-auto px-4 pt-3 pb-0">
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <div className="font-mono text-[10px] tracking-[0.25em] text-[var(--text-faint)] uppercase">
+              Inner Groove Brewing · Verona
+            </div>
+            <h1 className="font-display text-3xl sm:text-4xl glow-pulse leading-none">
+              The Stacks
+            </h1>
+          </div>
+          <div className="text-right">
+            <div className="font-mono text-[10px] text-[var(--text-faint)] uppercase tracking-wider">
+              Vinyl Collection
+            </div>
+          </div>
+        </div>
+        <nav className="flex gap-6 -mb-px">
+          <button
+            onClick={() => setTab('browse')}
+            className={`font-display text-xl pb-2 px-1 transition-colors ${
+              tab === 'browse' ? 'tab-active' : 'text-[var(--text-dim)] hover:text-[var(--text)]'
+            }`}>
+            Browse
+          </button>
+          <button
+            onClick={() => setTab('wishlist')}
+            className={`font-display text-xl pb-2 px-1 transition-colors ${
+              tab === 'wishlist' ? 'tab-active' : 'text-[var(--text-dim)] hover:text-[var(--text)]'
+            }`}>
+            Wishlist
+          </button>
+        </nav>
+      </div>
+    </header>
+  );
+}
+
+// ============================================================================
+// BROWSE TAB
+// ============================================================================
+function BrowseTab({ inventory, loading }) {
+  const [query, setQuery]       = useState('');
+  const [sort, setSort]         = useState('artist');     // artist | recent | random
+  const [genre, setGenre]       = useState(null);
+  const [decade, setDecade]     = useState(null);
+  const [showAllGenres, setShowAllGenres] = useState(false);
+  const [randomSeed, setRandomSeed] = useState(0);
+  const [selected, setSelected] = useState(null);
+
+  // Derive available genres + decades from the inventory
+  const { topGenres, allGenres, decades } = useMemo(() => {
+    const gCount = new Map();
+    const dSet = new Set();
+    for (const r of inventory) {
+      for (const g of (r.genres || [])) {
+        gCount.set(g, (gCount.get(g) || 0) + 1);
+      }
+      const d = decadeOf(r.year);
+      if (d) dSet.add(d);
+    }
+    const sortedGenres = [...gCount.entries()].sort((a, b) => b[1] - a[1]).map(([g]) => g);
+    return {
+      topGenres: sortedGenres.slice(0, 8),
+      allGenres: sortedGenres,
+      decades: [...dSet].sort(),
+    };
+  }, [inventory]);
+
+  // Apply filters + search + sort
+  const filtered = useMemo(() => {
+    let list = inventory;
+    if (query.trim()) {
+      const q = query.toLowerCase();
+      list = list.filter((r) =>
+        r.artist.toLowerCase().includes(q) || r.album.toLowerCase().includes(q)
+      );
+    }
+    if (genre)  list = list.filter((r) => (r.genres || []).includes(genre));
+    if (decade) list = list.filter((r) => decadeOf(r.year) === decade);
+
+    const out = [...list];
+    if (sort === 'artist') {
+      out.sort((a, b) => {
+        const ka = nameKey(a.artist), kb = nameKey(b.artist);
+        if (ka !== kb) return ka.localeCompare(kb);
+        return nameKey(a.album).localeCompare(nameKey(b.album));
+      });
+    } else if (sort === 'recent') {
+      out.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    } else if (sort === 'random') {
+      // Stable shuffle keyed on randomSeed so the order doesn't churn on every render
+      const seed = randomSeed;
+      out.sort((a, b) => {
+        const ha = ((a.id || '').charCodeAt(0) + seed) * 9301 % 233280;
+        const hb = ((b.id || '').charCodeAt(0) + seed) * 9301 % 233280;
+        return ha - hb;
+      });
+    }
+    return out;
+  }, [inventory, query, sort, genre, decade, randomSeed]);
+
+  return (
+    <div className="max-w-5xl mx-auto px-4 py-4">
+      {/* Search */}
+      <div className="relative mb-4">
+        <input
+          type="search"
+          inputMode="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search artist or album…"
+          className="w-full bg-[var(--bg-elev)] border border-[var(--line)] rounded-lg px-4 py-3 pr-10 text-[var(--text)] placeholder:text-[var(--text-faint)] focus:outline-none focus:border-[var(--hop)] focus:ring-1 focus:ring-[var(--hop)] transition"
+        />
+        <svg className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-[var(--text-faint)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-4.35-4.35M11 19a8 8 0 100-16 8 8 0 000 16z" />
+        </svg>
+      </div>
+
+      {/* Filter row: sort */}
+      <div className="flex items-center gap-2 mb-3 overflow-x-auto pb-1 -mx-4 px-4">
+        <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-faint)] mr-1">Sort</span>
+        {[
+          ['artist', 'A→Z'],
+          ['recent', 'New arrivals'],
+          ['random', 'Surprise me'],
+        ].map(([k, label]) => (
+          <button
+            key={k}
+            className="chip"
+            data-active={sort === k}
+            onClick={() => {
+              setSort(k);
+              if (k === 'random') setRandomSeed(Math.random() * 1000 | 0);
+            }}
+          >
+            {label}
+          </button>
+        ))}
+        {sort === 'random' && (
+          <button className="chip" onClick={() => setRandomSeed(Math.random() * 1000 | 0)}>
+            ↻ Reshuffle
+          </button>
+        )}
+      </div>
+
+      {/* Filter row: genres */}
+      {topGenres.length > 0 && (
+        <div className="flex items-center gap-2 mb-2 overflow-x-auto pb-1 -mx-4 px-4">
+          <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-faint)] mr-1">Genre</span>
+          <button className="chip" data-active={!genre} onClick={() => setGenre(null)}>All</button>
+          {(showAllGenres ? allGenres : topGenres).map((g) => (
+            <button key={g} className="chip" data-active={genre === g} onClick={() => setGenre(genre === g ? null : g)}>
+              {g}
+            </button>
+          ))}
+          {allGenres.length > topGenres.length && (
+            <button className="chip" onClick={() => setShowAllGenres((v) => !v)}>
+              {showAllGenres ? 'Less' : `+${allGenres.length - topGenres.length} more`}
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Filter row: decades */}
+      {decades.length > 0 && (
+        <div className="flex items-center gap-2 mb-4 overflow-x-auto pb-1 -mx-4 px-4">
+          <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-faint)] mr-1">Era</span>
+          <button className="chip" data-active={!decade} onClick={() => setDecade(null)}>All</button>
+          {decades.map((d) => (
+            <button key={d} className="chip" data-active={decade === d} onClick={() => setDecade(decade === d ? null : d)}>
+              {d}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Result count */}
+      <div className="font-mono text-[11px] uppercase tracking-wider text-[var(--text-faint)] mb-3">
+        {loading ? 'Loading…' : `${filtered.length} ${filtered.length === 1 ? 'record' : 'records'}`}
+        {(genre || decade) && (
+          <button
+            onClick={() => { setGenre(null); setDecade(null); }}
+            className="ml-3 text-[var(--hop)] hover:underline"
+          >
+            Clear filters
+          </button>
+        )}
+      </div>
+
+      {/* Grid */}
+      {loading ? (
+        <div className="flex items-center justify-center py-20">
+          <VinylSpinner size={80} />
+        </div>
+      ) : filtered.length === 0 ? (
+        <EmptyState query={query} hasFilters={!!(genre || decade)} />
+      ) : (
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
+          {filtered.map((rec, i) => (
+            <button
+              key={rec.id}
+              onClick={() => setSelected(rec)}
+              className="album-card text-left fade-rise"
+              style={{ animationDelay: `${Math.min(i, 24) * 25}ms` }}
+            >
+              <div className="cover-frame rounded-md border border-[var(--line)]">
+                <CoverImage src={rec.cover_url} alt={`${rec.artist} - ${rec.album}`} />
+                {rec.status && rec.status !== 'available' && (
+                  <div className="absolute top-2 left-2">
+                    <StatusPill status={rec.status} />
+                  </div>
+                )}
+              </div>
+              <div className="mt-2">
+                <div className="text-[13px] font-semibold text-[var(--text)] leading-tight line-clamp-2">
+                  {clean(rec.album)}
+                </div>
+                <div className="text-[12px] text-[var(--text-dim)] leading-tight mt-0.5 line-clamp-1">
+                  {clean(rec.artist)}
+                </div>
+                {rec.year && (
+                  <div className="font-mono text-[10px] text-[var(--text-faint)] mt-1">
+                    {rec.year}
+                  </div>
+                )}
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {selected && <AlbumDetail record={selected} onClose={() => setSelected(null)} />}
+    </div>
+  );
+}
+
+function EmptyState({ query, hasFilters }) {
+  return (
+    <div className="flex flex-col items-center justify-center py-16 text-center">
+      <VinylSpinner size={64} />
+      <div className="font-display text-2xl mt-4 text-[var(--text-dim)]">
+        {query ? 'No matches' : hasFilters ? 'No records in those filters' : 'The crate is empty'}
+      </div>
+      <p className="text-sm text-[var(--text-faint)] mt-2 max-w-xs">
+        {query
+          ? "Try a different search, or hit the Wishlist tab to request it."
+          : hasFilters
+          ? 'Try clearing some filters.'
+          : 'Records will appear here as they get added.'}
+      </p>
+    </div>
+  );
+}
+
+// ============================================================================
+// ALBUM DETAIL MODAL — tracklist by side, Discogs link, paper-form prompt
+// ============================================================================
+function AlbumDetail({ record, onClose }) {
+  const sheetRef = useRef(null);
+
+  // Esc to close, lock body scroll while open
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prev;
+    };
+  }, [onClose]);
+
+  // Group tracks by side
+  const sides = useMemo(() => {
+    if (!record.tracklist) return [];
+    const groups = new Map();
+    for (const t of record.tracklist) {
+      const s = t.side || '?';
+      if (!groups.has(s)) groups.set(s, []);
+      groups.get(s).push(t);
+    }
+    return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b));
+  }, [record.tracklist]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center scrim-anim"
+      style={{ background: 'rgba(0,0,0,0.78)', backdropFilter: 'blur(4px)' }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div
+        ref={sheetRef}
+        className="sheet-anim relative bg-[var(--bg-elev)] border-t sm:border border-[var(--line)] rounded-t-2xl sm:rounded-2xl w-full sm:max-w-2xl max-h-[92vh] overflow-y-auto safe-bottom"
+      >
+        {/* Close button */}
+        <button
+          onClick={onClose}
+          aria-label="Close"
+          className="absolute top-3 right-3 z-10 w-9 h-9 flex items-center justify-center rounded-full bg-black/50 backdrop-blur text-white hover:bg-black/80 transition"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6 6l12 12M6 18L18 6" />
+          </svg>
+        </button>
+
+        {/* Hero */}
+        <div className="relative p-4 sm:p-6 flex flex-col sm:flex-row gap-5">
+          <div className="w-full sm:w-48 flex-shrink-0">
+            <div className="cover-frame rounded-lg border border-[var(--line)] shadow-[0_8px_32px_rgba(0,0,0,0.5)]">
+              <CoverImage src={record.cover_url} alt={`${record.artist} - ${record.album}`} />
+            </div>
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--text-faint)] mb-1">
+              {record.year || '—'}{record.year && (record.genres?.length || record.styles?.length) ? ' · ' : ''}
+              {(record.genres || []).slice(0, 2).join(' · ')}
+            </div>
+            <h2 className="font-display text-3xl sm:text-4xl text-[var(--text)] leading-none">
+              {clean(record.album)}
+            </h2>
+            <div className="text-lg text-[var(--text-dim)] mt-1">
+              {clean(record.artist)}
+            </div>
+
+            {(record.styles?.length > 0) && (
+              <div className="flex flex-wrap gap-1.5 mt-3">
+                {record.styles.slice(0, 5).map((s) => (
+                  <span key={s} className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded border border-[var(--line)] text-[var(--text-dim)]">
+                    {s}
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {record.status && record.status !== 'available' && (
+              <div className="mt-3"><StatusPill status={record.status} /></div>
+            )}
+
+            <div className="mt-4 flex flex-wrap gap-2">
+              {record.discogs_url && (
+                <a
+                  href={record.discogs_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 text-[12px] font-mono uppercase tracking-wider px-3 py-1.5 rounded border border-[var(--line)] text-[var(--text-dim)] hover:border-[var(--hop)] hover:text-[var(--hop)] transition"
+                >
+                  Discogs ↗
+                </a>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Tracklist by side */}
+        {sides.length > 0 ? (
+          <div className="px-4 sm:px-6 pb-4">
+            <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--text-faint)] mb-3">
+              Tracklist · pick a side
+            </div>
+            <div className="space-y-5">
+              {sides.map(([side, tracks]) => (
+                <div key={side}>
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className="side-badge">{side}</div>
+                    <div className="font-display text-xl text-[var(--text-dim)]">Side {side}</div>
+                    <div className="font-mono text-[10px] text-[var(--text-faint)] ml-auto">
+                      {tracks.length} {tracks.length === 1 ? 'track' : 'tracks'}
+                    </div>
+                  </div>
+                  <ol className="border border-[var(--line)] rounded-md overflow-hidden">
+                    {tracks.map((t, i) => (
+                      <li
+                        key={`${side}-${i}`}
+                        className="flex items-center gap-3 px-3 py-2 border-b border-[var(--line)] last:border-b-0 text-sm hover:bg-[var(--bg-card)] transition"
+                      >
+                        <span className="font-mono text-[10px] text-[var(--text-faint)] w-6 tabular-nums">
+                          {t.position || i + 1}
+                        </span>
+                        <span className="flex-1 truncate text-[var(--text)]">{t.title}</span>
+                        {t.duration && (
+                          <span className="font-mono text-[11px] text-[var(--text-faint)] tabular-nums">
+                            {t.duration}
+                          </span>
+                        )}
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="px-4 sm:px-6 pb-4">
+            <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--text-faint)] mb-3">
+              Tracklist
+            </div>
+            <div className="border border-dashed border-[var(--line)] rounded-md p-4 text-center text-[var(--text-faint)] text-sm">
+              No tracklist on file. Check the sleeve or hit the Discogs link.
+            </div>
+          </div>
+        )}
+
+        {/* Paper-form prompt — the operational nudge for patrons */}
+        <div className="mx-4 sm:mx-6 mb-5 p-4 rounded-lg border border-[var(--hop-deep)] bg-gradient-to-br from-[#6dc13510] to-transparent">
+          <div className="font-display text-xl text-[var(--hop)] glow-pulse leading-none mb-1">
+            Want to hear it?
+          </div>
+          <p className="text-sm text-[var(--text-dim)]">
+            Fill out a paper request slip at the bar. Note the album, the side
+            you want, and your name — the bartender will spin it up when they
+            can.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// WISHLIST TAB
+// ============================================================================
+function WishlistTab() {
+  const [items, setItems]     = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [voted, setVoted]     = useState(new Set());
+  const [showAdd, setShowAdd] = useState(false);
+  const [sort, setSort]       = useState('top'); // top | new
+  const voterId = useRef(getVoterId()).current;
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const [{ data: w, error: e1 }, { data: v, error: e2 }] = await Promise.all([
+      supabase.from('vinyl_wishlist').select('*').neq('status', 'declined'),
+      supabase.from('vinyl_wishlist_votes').select('wishlist_id').eq('voter_id', voterId),
+    ]);
+    if (e1) console.error(e1);
+    if (e2) console.error(e2);
+    setItems(w || []);
+    setVoted(new Set((v || []).map((r) => r.wishlist_id)));
+    setLoading(false);
+  }, [voterId]);
+
+  useEffect(() => {
+    load();
+    // Realtime: bumps + new submissions appear live
+    const channel = supabase
+      .channel('vinyl_wishlist_realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'vinyl_wishlist' }, load)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'vinyl_wishlist_votes' }, load)
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [load]);
+
+  const sorted = useMemo(() => {
+    const out = [...items];
+    if (sort === 'top') out.sort((a, b) => b.vote_count - a.vote_count || new Date(b.created_at) - new Date(a.created_at));
+    else                out.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    return out;
+  }, [items, sort]);
+
+  const toggleVote = async (item) => {
+    const has = voted.has(item.id);
+    // Optimistic update
+    setVoted((prev) => {
+      const next = new Set(prev);
+      if (has) next.delete(item.id); else next.add(item.id);
+      return next;
+    });
+    setItems((prev) => prev.map((r) =>
+      r.id === item.id ? { ...r, vote_count: r.vote_count + (has ? -1 : 1) } : r
+    ));
+
+    if (has) {
+      const { error } = await supabase
+        .from('vinyl_wishlist_votes')
+        .delete()
+        .eq('wishlist_id', item.id)
+        .eq('voter_id', voterId);
+      if (error) { console.error(error); load(); }
+    } else {
+      const { error } = await supabase
+        .from('vinyl_wishlist_votes')
+        .insert({ wishlist_id: item.id, voter_id: voterId });
+      if (error) { console.error(error); load(); }
+    }
+  };
+
+  return (
+    <div className="max-w-3xl mx-auto px-4 py-4">
+      {/* Top: intro + add button */}
+      <div className="mb-4">
+        <h2 className="font-display text-3xl text-[var(--text)] leading-none">
+          Don't see what you want?
+        </h2>
+        <p className="text-sm text-[var(--text-dim)] mt-1.5">
+          Suggest an album below. Vote up the ones you'd like to hear — popular
+          requests get added to the collection.
+        </p>
+      </div>
+
+      <button
+        onClick={() => setShowAdd(true)}
+        className="w-full mb-5 py-3 rounded-lg bg-[var(--hop)] text-[#0a1a02] font-display text-2xl tracking-wider hover:brightness-110 transition shadow-[0_0_24px_var(--hop-glow)]"
+      >
+        + Suggest an album
+      </button>
+
+      {/* Sort */}
+      <div className="flex items-center gap-2 mb-3">
+        <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-faint)] mr-1">Sort</span>
+        <button className="chip" data-active={sort === 'top'} onClick={() => setSort('top')}>Most votes</button>
+        <button className="chip" data-active={sort === 'new'} onClick={() => setSort('new')}>Newest</button>
+      </div>
+
+      {loading ? (
+        <div className="flex items-center justify-center py-20">
+          <VinylSpinner size={64} />
+        </div>
+      ) : sorted.length === 0 ? (
+        <div className="border border-dashed border-[var(--line)] rounded-lg p-8 text-center">
+          <div className="font-display text-2xl text-[var(--text-dim)]">No requests yet</div>
+          <p className="text-sm text-[var(--text-faint)] mt-1">Be the first to suggest one.</p>
+        </div>
+      ) : (
+        <ul className="space-y-2">
+          {sorted.map((item) => (
+            <WishlistItem key={item.id} item={item} voted={voted.has(item.id)} onToggle={() => toggleVote(item)} />
+          ))}
+        </ul>
+      )}
+
+      {showAdd && <WishlistAddForm onClose={() => setShowAdd(false)} onAdded={load} />}
+    </div>
+  );
+}
+
+function WishlistItem({ item, voted, onToggle }) {
+  const [bump, setBump] = useState(false);
+  const handleClick = () => {
+    setBump(true);
+    setTimeout(() => setBump(false), 350);
+    onToggle();
+  };
+  return (
+    <li className={`flex items-center gap-3 p-3 rounded-lg border transition ${
+      voted ? 'border-[var(--hop-deep)] bg-[#6dc1350a]' : 'border-[var(--line)] bg-[var(--bg-elev)]'
+    }`}>
+      <button
+        onClick={handleClick}
+        aria-label={voted ? 'Remove your vote' : 'Vote up'}
+        className={`flex flex-col items-center justify-center w-12 h-14 rounded-md border transition ${
+          voted
+            ? 'border-[var(--hop)] bg-[var(--hop)] text-[#0a1a02]'
+            : 'border-[var(--line)] bg-[var(--bg-card)] text-[var(--text-dim)] hover:border-[var(--hop)] hover:text-[var(--hop)]'
+        } ${bump ? 'vote-bump' : ''}`}
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M5 15l7-7 7 7" />
+        </svg>
+        <div className="font-display text-base leading-none mt-0.5 tabular-nums">{item.vote_count}</div>
+      </button>
+
+      <div className="flex-1 min-w-0">
+        <div className="font-semibold text-[var(--text)] leading-tight truncate">
+          {clean(item.album)}
+        </div>
+        <div className="text-sm text-[var(--text-dim)] leading-tight mt-0.5 truncate">
+          {clean(item.artist)}
+          {item.year && <span className="text-[var(--text-faint)]"> · {item.year}</span>}
+        </div>
+        {item.note && (
+          <div className="text-[11px] text-[var(--text-faint)] mt-1 italic line-clamp-2">
+            "{item.note}"{item.submitted_by ? ` — ${item.submitted_by}` : ''}
+          </div>
+        )}
+        {item.status === 'ordered' && (
+          <div className="font-mono text-[10px] uppercase tracking-wider mt-1.5 text-[var(--warn)]">
+            ◉ On order
+          </div>
+        )}
+        {item.status === 'acquired' && (
+          <div className="font-mono text-[10px] uppercase tracking-wider mt-1.5 text-[var(--hop)]">
+            ✓ In the collection
+          </div>
+        )}
+      </div>
+    </li>
+  );
+}
+
+function WishlistAddForm({ onClose, onAdded }) {
+  const [artist, setArtist]   = useState('');
+  const [album, setAlbum]     = useState('');
+  const [name, setName]       = useState('');
+  const [note, setNote]       = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [err, setErr] = useState(null);
+
+  const submit = async () => {
+    setErr(null);
+    if (!artist.trim() || !album.trim()) {
+      setErr('Artist and album are required.');
+      return;
+    }
+    setSubmitting(true);
+    const { error } = await supabase.from('vinyl_wishlist').insert({
+      artist: artist.trim(),
+      album: album.trim(),
+      submitted_by: name.trim() || null,
+      note: note.trim() || null,
+    });
+    setSubmitting(false);
+    if (error) {
+      console.error(error);
+      setErr('Could not submit. Try again?');
+      return;
+    }
+    onAdded();
+    onClose();
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center scrim-anim"
+      style={{ background: 'rgba(0,0,0,0.78)', backdropFilter: 'blur(4px)' }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div className="sheet-anim bg-[var(--bg-elev)] border-t sm:border border-[var(--line)] rounded-t-2xl sm:rounded-2xl w-full sm:max-w-md p-5 safe-bottom">
+        <div className="flex items-start justify-between mb-4">
+          <h3 className="font-display text-2xl text-[var(--hop)] glow-pulse leading-none">
+            Suggest an album
+          </h3>
+          <button onClick={onClose} aria-label="Close" className="w-8 h-8 flex items-center justify-center rounded-full text-[var(--text-dim)] hover:text-[var(--text)]">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 6l12 12M6 18L18 6" />
+            </svg>
+          </button>
+        </div>
+
+        <div className="space-y-3">
+          <label className="block">
+            <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-faint)]">Artist *</span>
+            <input
+              value={artist}
+              onChange={(e) => setArtist(e.target.value)}
+              placeholder="e.g. Tame Impala"
+              className="mt-1 w-full bg-[var(--bg)] border border-[var(--line)] rounded-md px-3 py-2 text-[var(--text)] placeholder:text-[var(--text-faint)] focus:outline-none focus:border-[var(--hop)] focus:ring-1 focus:ring-[var(--hop)]"
+            />
+          </label>
+          <label className="block">
+            <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-faint)]">Album *</span>
+            <input
+              value={album}
+              onChange={(e) => setAlbum(e.target.value)}
+              placeholder="e.g. Currents"
+              className="mt-1 w-full bg-[var(--bg)] border border-[var(--line)] rounded-md px-3 py-2 text-[var(--text)] placeholder:text-[var(--text-faint)] focus:outline-none focus:border-[var(--hop)] focus:ring-1 focus:ring-[var(--hop)]"
+            />
+          </label>
+          <label className="block">
+            <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-faint)]">Your name (optional)</span>
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Brian"
+              className="mt-1 w-full bg-[var(--bg)] border border-[var(--line)] rounded-md px-3 py-2 text-[var(--text)] placeholder:text-[var(--text-faint)] focus:outline-none focus:border-[var(--hop)] focus:ring-1 focus:ring-[var(--hop)]"
+            />
+          </label>
+          <label className="block">
+            <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-faint)]">Why? (optional)</span>
+            <textarea
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="Best record of the decade. Trust me."
+              rows={2}
+              maxLength={200}
+              className="mt-1 w-full bg-[var(--bg)] border border-[var(--line)] rounded-md px-3 py-2 text-[var(--text)] placeholder:text-[var(--text-faint)] focus:outline-none focus:border-[var(--hop)] focus:ring-1 focus:ring-[var(--hop)] resize-none"
+            />
+          </label>
+        </div>
+
+        {err && (
+          <div className="mt-3 text-sm text-red-400">{err}</div>
+        )}
+
+        <button
+          onClick={submit}
+          disabled={submitting}
+          className="mt-5 w-full py-3 rounded-lg bg-[var(--hop)] text-[#0a1a02] font-display text-xl tracking-wider hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition"
+        >
+          {submitting ? 'Submitting…' : 'Submit'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// APP SHELL
+// ============================================================================
+function App() {
+  const [tab, setTab]             = useState('browse');
+  const [inventory, setInventory] = useState([]);
+  const [loading, setLoading]     = useState(true);
+
+  // Load inventory once on mount
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      // Pagination is unnecessary at 170 rows but future-proofs it
+      const { data, error } = await supabase
+        .from('vinyl_inventory')
+        .select('id, artist, album, year, genres, styles, cover_url, discogs_url, tracklist, sides, status, created_at')
+        .order('artist', { ascending: true });
+      if (!cancelled) {
+        if (error) console.error(error);
+        setInventory(data || []);
+        setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  return (
+    <>
+      <Header tab={tab} setTab={setTab} />
+      {tab === 'browse'   && <BrowseTab inventory={inventory} loading={loading} />}
+      {tab === 'wishlist' && <WishlistTab />}
+      <footer className="max-w-5xl mx-auto px-4 py-8 text-center font-mono text-[10px] tracking-[0.2em] uppercase text-[var(--text-faint)]">
+        Inner Groove Brewing · Verona, PA
+      </footer>
+    </>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App />);
+</script>
+</body>
+</html>
