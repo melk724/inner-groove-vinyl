@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <meta name="theme-color" content="#0a0a0a" />
 <title>Inner Groove · Vinyl Collection</title>
+<link rel="icon" type="image/png" href="/igb-logo.png" />
+<link rel="apple-touch-icon" href="/igb-logo.png" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=JetBrains+Mono:wght@400;500&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -223,6 +225,52 @@ function nameKey(s) {
   return (s || '').toLowerCase().replace(/^the\s+/, '');
 }
 
+/** Escape a value for safe CSV inclusion. RFC 4180:
+ *  - if the value contains a comma, quote, or newline, wrap in double quotes
+ *  - any internal double quotes get doubled */
+function csvCell(val) {
+  if (val == null) return '';
+  const s = typeof val === 'string' ? val : String(val);
+  if (/[",\r\n]/.test(s)) {
+    return `"${s.replace(/"/g, '""')}"`;
+  }
+  return s;
+}
+
+/** Build a CSV string from a header row + array of objects.
+ *  columns is an array of [key, label] tuples; label is what shows in the
+ *  CSV header, key is the property to read from each row. */
+function buildCsv(rows, columns) {
+  const header = columns.map(([, label]) => csvCell(label)).join(',');
+  const lines  = rows.map((r) =>
+    columns.map(([key]) => csvCell(r[key])).join(',')
+  );
+  // Lead with a UTF-8 BOM so Excel opens it correctly with non-ASCII chars
+  return '\uFEFF' + [header, ...lines].join('\r\n');
+}
+
+/** Trigger a download of `content` as `filename` in the user's browser. */
+function downloadFile(filename, content, mimeType = 'text/csv;charset=utf-8') {
+  const blob = new Blob([content], { type: mimeType });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  // Defer revoke so Safari has time to start the download
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/** Format a Date or ISO string for filename usage: 2026-05-03 */
+function ymd(d = new Date()) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 // ============================================================================
 // SHARED UI BITS
 // ============================================================================
@@ -287,16 +335,33 @@ function Header({ tab, setTab }) {
   return (
     <header className="sticky top-0 z-40 bg-[var(--bg)]/85 backdrop-blur-md border-b border-[var(--line)]">
       <div className="max-w-5xl mx-auto px-4 pt-3 pb-0">
-        <div className="flex items-center justify-between mb-3">
-          <div>
-            <div className="font-mono text-[10px] tracking-[0.25em] text-[var(--text-faint)] uppercase">
-              Inner Groove Brewing · Verona
+        <div className="flex items-center justify-between mb-3 gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <a
+              href="https://www.innergroovebrewing.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="Inner Groove Brewing"
+              className="flex-shrink-0 opacity-90 hover:opacity-100 transition-opacity"
+            >
+              <img
+                src="/igb-logo.png"
+                alt="Inner Groove Brewing"
+                width={48}
+                height={36}
+                className="h-9 w-auto block"
+              />
+            </a>
+            <div className="min-w-0">
+              <div className="font-mono text-[10px] tracking-[0.25em] text-[var(--text-faint)] uppercase">
+                Inner Groove Brewing · Verona
+              </div>
+              <h1 className="font-display text-3xl sm:text-4xl glow-pulse leading-none">
+                The Stacks
+              </h1>
             </div>
-            <h1 className="font-display text-3xl sm:text-4xl glow-pulse leading-none">
-              The Stacks
-            </h1>
           </div>
-          <div className="text-right">
+          <div className="text-right flex-shrink-0">
             <div className="font-mono text-[10px] text-[var(--text-faint)] uppercase tracking-wider">
               Vinyl Collection
             </div>
@@ -880,14 +945,27 @@ function WishlistAddForm({ onClose, onAdded }) {
   const [artist, setArtist]   = useState('');
   const [album, setAlbum]     = useState('');
   const [name, setName]       = useState('');
+  const [email, setEmail]     = useState('');
   const [note, setNote]       = useState('');
+  const [notifyOnAcquired, setNotifyOnAcquired]       = useState(true);
+  const [subscribeNewsletter, setSubscribeNewsletter] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState(null);
+
+  const emailLooksValid = (e) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test((e || '').trim());
 
   const submit = async () => {
     setErr(null);
     if (!artist.trim() || !album.trim()) {
       setErr('Artist and album are required.');
+      return;
+    }
+    if (!email.trim()) {
+      setErr('Email is required so we can let you know if your record gets added.');
+      return;
+    }
+    if (!emailLooksValid(email)) {
+      setErr("That email doesn't look right. Double-check it?");
       return;
     }
     setSubmitting(true);
@@ -896,11 +974,18 @@ function WishlistAddForm({ onClose, onAdded }) {
       album: album.trim(),
       submitted_by: name.trim() || null,
       note: note.trim() || null,
+      submitter_email: email.trim().toLowerCase(),
+      notify_on_acquired: notifyOnAcquired,
+      subscribe_newsletter: subscribeNewsletter,
     });
     setSubmitting(false);
     if (error) {
       console.error(error);
-      setErr('Could not submit. Try again?');
+      if (error.code === '23514' && /email_format/.test(error.message || '')) {
+        setErr("That email doesn't look right. Double-check it?");
+      } else {
+        setErr('Could not submit. Try again?');
+      }
       return;
     }
     onAdded();
@@ -913,7 +998,7 @@ function WishlistAddForm({ onClose, onAdded }) {
       style={{ background: 'rgba(0,0,0,0.78)', backdropFilter: 'blur(4px)' }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div className="sheet-anim bg-[var(--bg-elev)] border-t sm:border border-[var(--line)] rounded-t-2xl sm:rounded-2xl w-full sm:max-w-md p-5 safe-bottom">
+      <div className="sheet-anim bg-[var(--bg-elev)] border-t sm:border border-[var(--line)] rounded-t-2xl sm:rounded-2xl w-full sm:max-w-md p-5 safe-bottom max-h-[92vh] overflow-y-auto">
         <div className="flex items-start justify-between mb-4">
           <h3 className="font-display text-2xl text-[var(--hop)] glow-pulse leading-none">
             Suggest an album
@@ -945,6 +1030,18 @@ function WishlistAddForm({ onClose, onAdded }) {
             />
           </label>
           <label className="block">
+            <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-faint)]">Email *</span>
+            <input
+              type="email"
+              inputMode="email"
+              autoComplete="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="you@example.com"
+              className="mt-1 w-full bg-[var(--bg)] border border-[var(--line)] rounded-md px-3 py-2 text-[var(--text)] placeholder:text-[var(--text-faint)] focus:outline-none focus:border-[var(--hop)] focus:ring-1 focus:ring-[var(--hop)]"
+            />
+          </label>
+          <label className="block">
             <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-faint)]">Your name (optional)</span>
             <input
               value={name}
@@ -966,6 +1063,32 @@ function WishlistAddForm({ onClose, onAdded }) {
           </label>
         </div>
 
+        {/* Opt-in checkboxes */}
+        <div className="mt-4 space-y-2 pt-3 border-t border-[var(--line)]">
+          <label className="flex items-start gap-2.5 cursor-pointer group">
+            <input
+              type="checkbox"
+              checked={notifyOnAcquired}
+              onChange={(e) => setNotifyOnAcquired(e.target.checked)}
+              className="mt-0.5 w-4 h-4 accent-[var(--hop)] cursor-pointer"
+            />
+            <span className="text-[13px] text-[var(--text-dim)] group-hover:text-[var(--text)] leading-snug">
+              <strong className="text-[var(--text)]">Email me</strong> if Inner Groove adds this record to the collection.
+            </span>
+          </label>
+          <label className="flex items-start gap-2.5 cursor-pointer group">
+            <input
+              type="checkbox"
+              checked={subscribeNewsletter}
+              onChange={(e) => setSubscribeNewsletter(e.target.checked)}
+              className="mt-0.5 w-4 h-4 accent-[var(--hop)] cursor-pointer"
+            />
+            <span className="text-[13px] text-[var(--text-dim)] group-hover:text-[var(--text)] leading-snug">
+              Sign me up for the <strong className="text-[var(--text)]">Inner Groove newsletter</strong> — beer drops, vinyl events, the occasional show.
+            </span>
+          </label>
+        </div>
+
         {err && (
           <div className="mt-3 text-sm text-red-400">{err}</div>
         )}
@@ -977,6 +1100,10 @@ function WishlistAddForm({ onClose, onAdded }) {
         >
           {submitting ? 'Submitting…' : 'Submit'}
         </button>
+
+        <p className="mt-3 text-[10px] text-[var(--text-faint)] leading-relaxed">
+          We'll only email you about what you opt into above. We don't share your email.
+        </p>
       </div>
     </div>
   );
@@ -1709,16 +1836,21 @@ function EditRecord({ record, onClose, onSaved }) {
 // ----------------------------------------------------------------------------
 function WishlistAdminView() {
   const [items, setItems]     = useState([]);
+  const [subscribers, setSubscribers] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [view, setView]       = useState('requests'); // 'requests' | 'subscribers'
+  const [copyFlash, setCopyFlash] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from('vinyl_wishlist')
-      .select('*')
-      .order('vote_count', { ascending: false });
-    if (error) console.error(error);
-    setItems(data || []);
+    const [{ data: w, error: e1 }, { data: s, error: e2 }] = await Promise.all([
+      supabase.from('vinyl_wishlist').select('*').order('vote_count', { ascending: false }),
+      supabase.from('email_subscribers').select('*').order('subscribed_at', { ascending: false }),
+    ]);
+    if (e1) console.error(e1);
+    if (e2) console.error(e2);
+    setItems(w || []);
+    setSubscribers(s || []);
     setLoading(false);
   }, []);
 
@@ -1730,59 +1862,269 @@ function WishlistAdminView() {
     load();
   };
 
+  const markNotified = async (item) => {
+    const { error } = await supabase.from('vinyl_wishlist').update({ notified_at: new Date().toISOString() }).eq('id', item.id);
+    if (error) { alert(error.message); return; }
+    load();
+  };
+
+  const unsubscribe = async (sub) => {
+    if (!confirm(`Unsubscribe ${sub.email}?`)) return;
+    const { error } = await supabase
+      .from('email_subscribers')
+      .update({ unsubscribed_at: new Date().toISOString() })
+      .eq('email', sub.email);
+    if (error) { alert(error.message); return; }
+    load();
+  };
+
+  const copyToClipboard = async (text, label) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopyFlash(label);
+      setTimeout(() => setCopyFlash(null), 1800);
+    } catch {
+      // Fallback: select + execCommand for older browsers
+      alert(`Copy this:\n\n${text}`);
+    }
+  };
+
+  // Aggregate "people to notify when a given record arrives" across all
+  // wishlist requests for the same artist+album (in case multiple patrons
+  // requested the same record separately).
+  const notifyEmailsFor = (item) => {
+    const key = `${item.artist}|${item.album}`.toLowerCase();
+    return [...new Set(
+      items
+        .filter((r) => `${r.artist}|${r.album}`.toLowerCase() === key)
+        .filter((r) => r.notify_on_acquired && r.submitter_email)
+        .map((r) => r.submitter_email)
+    )];
+  };
+
+  const allActiveSubscribers = subscribers.filter((s) => !s.unsubscribed_at);
+
   return (
     <div className="max-w-3xl mx-auto px-4 py-4">
-      <div className="font-mono text-[11px] uppercase tracking-wider text-[var(--text-faint)] mb-3">
-        {loading ? 'Loading…' : `${items.length} requests`}
+      {copyFlash && (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-lg bg-[var(--hop)] text-[#0a1a02] font-mono text-sm shadow-[0_0_24px_var(--hop-glow)] sheet-anim">
+          ✓ Copied {copyFlash}
+        </div>
+      )}
+
+      {/* Sub-tabs */}
+      <div className="flex items-center gap-2 mb-4 border-b border-[var(--line)] -mx-4 px-4">
+        <button
+          onClick={() => setView('requests')}
+          className={`font-display text-base pb-2 px-1 transition-colors ${
+            view === 'requests' ? 'tab-active' : 'text-[var(--text-dim)] hover:text-[var(--text)]'
+          }`}>
+          Requests <span className="text-[var(--text-faint)] text-xs">({items.length})</span>
+        </button>
+        <button
+          onClick={() => setView('subscribers')}
+          className={`font-display text-base pb-2 px-1 transition-colors ${
+            view === 'subscribers' ? 'tab-active' : 'text-[var(--text-dim)] hover:text-[var(--text)]'
+          }`}>
+          Newsletter <span className="text-[var(--text-faint)] text-xs">({allActiveSubscribers.length})</span>
+        </button>
       </div>
+
       {loading ? (
         <div className="flex items-center justify-center py-12"><VinylSpinner /></div>
-      ) : items.length === 0 ? (
-        <div className="text-center text-[var(--text-faint)] py-12">No wishlist items yet.</div>
-      ) : (
-        <ul className="space-y-2">
-          {items.map((it) => (
-            <li key={it.id} className="p-3 rounded-lg border border-[var(--line)] bg-[var(--bg-elev)]">
-              <div className="flex items-start gap-3">
-                <div className="font-display text-2xl text-[var(--hop)] leading-none w-10 text-center">{it.vote_count}</div>
-                <div className="flex-1 min-w-0">
-                  <div className="font-semibold text-[var(--text)]">{clean(it.album)}</div>
-                  <div className="text-sm text-[var(--text-dim)]">{clean(it.artist)}</div>
-                  {it.note && <div className="text-[11px] italic text-[var(--text-faint)] mt-1">"{it.note}"{it.submitted_by ? ` — ${it.submitted_by}` : ''}</div>}
-                  <div className="font-mono text-[10px] uppercase tracking-wider mt-2">
-                    Status: <span className="text-[var(--text-dim)]">{it.status}</span>
+      ) : view === 'requests' ? (
+        items.length === 0 ? (
+          <div className="text-center text-[var(--text-faint)] py-12">No wishlist items yet.</div>
+        ) : (
+          <>
+            <div className="mb-3 flex items-center gap-2 flex-wrap">
+              <button
+                onClick={() => {
+                  const csv = buildCsv(items, [
+                    ['artist',               'artist'],
+                    ['album',                'album'],
+                    ['vote_count',           'votes'],
+                    ['status',               'status'],
+                    ['submitter_email',      'email'],
+                    ['submitted_by',         'submitted_by'],
+                    ['note',                 'note'],
+                    ['notify_on_acquired',   'notify_on_acquired'],
+                    ['subscribe_newsletter', 'subscribe_newsletter'],
+                    ['notified_at',          'notified_at'],
+                    ['created_at',           'created_at'],
+                  ]);
+                  downloadFile(`igb-wishlist-${ymd()}.csv`, csv);
+                }}
+                className="text-[11px] font-mono uppercase tracking-wider px-3 py-1.5 rounded border border-[var(--hop)] text-[var(--hop)] hover:bg-[#6dc13510]">
+                ↓ Export wishlist CSV ({items.length})
+              </button>
+              <span className="text-[11px] font-mono text-[var(--text-faint)]">
+                · everything below as a spreadsheet
+              </span>
+            </div>
+            <ul className="space-y-2">
+              {items.map((it) => {
+                const notifyEmails = notifyEmailsFor(it);
+                return (
+                  <li key={it.id} className="p-3 rounded-lg border border-[var(--line)] bg-[var(--bg-elev)]">
+                    <div className="flex items-start gap-3">
+                    <div className="font-display text-2xl text-[var(--hop)] leading-none w-10 text-center">{it.vote_count}</div>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-semibold text-[var(--text)]">{clean(it.album)}</div>
+                      <div className="text-sm text-[var(--text-dim)]">{clean(it.artist)}</div>
+                      {it.note && <div className="text-[11px] italic text-[var(--text-faint)] mt-1">"{it.note}"{it.submitted_by ? ` — ${it.submitted_by}` : ''}</div>}
+                      {/* Submitter contact info */}
+                      {(it.submitter_email || it.notify_on_acquired) && (
+                        <div className="mt-2 p-2 rounded bg-[var(--bg)] border border-[var(--line)] text-[11px] font-mono">
+                          {it.submitter_email && (
+                            <div className="flex items-center gap-2">
+                              <span className="text-[var(--text-faint)]">✉</span>
+                              <span className="text-[var(--text-dim)] truncate">{it.submitter_email}</span>
+                              <button
+                                onClick={() => copyToClipboard(it.submitter_email, 'email')}
+                                className="ml-auto text-[var(--text-faint)] hover:text-[var(--hop)]"
+                                aria-label="Copy email"
+                              >Copy</button>
+                            </div>
+                          )}
+                          <div className="flex gap-3 mt-1 text-[10px] uppercase tracking-wider">
+                            {it.notify_on_acquired && (
+                              <span className={it.notified_at ? 'text-[var(--text-faint)] line-through' : 'text-[var(--hop)]'}>
+                                ◉ wants notification
+                                {it.notified_at && ' · sent'}
+                              </span>
+                            )}
+                            {it.subscribe_newsletter && (
+                              <span className="text-[var(--hop)]">◉ newsletter</span>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                      <div className="font-mono text-[10px] uppercase tracking-wider mt-2">
+                        Status: <span className="text-[var(--text-dim)]">{it.status}</span>
+                      </div>
+                    </div>
                   </div>
-                </div>
+
+                  {/* Notify-list shortcut: when status is acquired and there are emails to notify */}
+                  {it.status === 'acquired' && notifyEmails.length > 0 && !it.notified_at && (
+                    <div className="mt-3 p-2 rounded border border-[var(--hop-deep)] bg-[#6dc1350a]">
+                      <div className="text-[11px] font-mono text-[var(--hop)] mb-1.5">
+                        ✦ {notifyEmails.length} {notifyEmails.length === 1 ? 'person wants' : 'people want'} to know this arrived
+                      </div>
+                      <div className="flex gap-2 flex-wrap">
+                        <button
+                          onClick={() => copyToClipboard(notifyEmails.join(', '), `${notifyEmails.length} email${notifyEmails.length === 1 ? '' : 's'}`)}
+                          className="text-[10px] font-mono uppercase tracking-wider px-2 py-1 rounded bg-[var(--hop)] text-[#0a1a02]">
+                          Copy emails for bcc
+                        </button>
+                        <a
+                          href={`mailto:?bcc=${encodeURIComponent(notifyEmails.join(','))}&subject=${encodeURIComponent(`Inner Groove: "${it.album}" is in the collection!`)}&body=${encodeURIComponent(`Hey — you asked us to grab ${it.artist} - ${it.album} for the brewery. It's in! Come spin it next time you're in.\n\n— Inner Groove`)}`}
+                          className="text-[10px] font-mono uppercase tracking-wider px-2 py-1 rounded border border-[var(--hop)] text-[var(--hop)] hover:bg-[#6dc13510]">
+                          Open in mail
+                        </a>
+                        <button
+                          onClick={() => markNotified(it)}
+                          className="text-[10px] font-mono uppercase tracking-wider px-2 py-1 rounded border border-[var(--line)] text-[var(--text-dim)] hover:border-[var(--text-faint)]">
+                          Mark sent
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex gap-2 mt-3 flex-wrap">
+                    {it.status !== 'open' && (
+                      <button onClick={() => setStatus(it, 'open')}
+                        className="text-[10px] font-mono uppercase tracking-wider px-2 py-1 rounded border border-[var(--line)] text-[var(--text-dim)] hover:border-[var(--text-faint)]">
+                        Reopen
+                      </button>
+                    )}
+                    {it.status !== 'ordered' && (
+                      <button onClick={() => setStatus(it, 'ordered')}
+                        className="text-[10px] font-mono uppercase tracking-wider px-2 py-1 rounded border border-[var(--warn)] text-[var(--warn)] hover:bg-[#fbbf2410]">
+                        Mark ordered
+                      </button>
+                    )}
+                    {it.status !== 'acquired' && (
+                      <button onClick={() => setStatus(it, 'acquired')}
+                        className="text-[10px] font-mono uppercase tracking-wider px-2 py-1 rounded border border-[var(--hop)] text-[var(--hop)] hover:bg-[#6dc13510]">
+                        Mark acquired
+                      </button>
+                    )}
+                    {it.status !== 'declined' && (
+                      <button onClick={() => setStatus(it, 'declined')}
+                        className="text-[10px] font-mono uppercase tracking-wider px-2 py-1 rounded border border-red-800 text-red-400 hover:bg-red-900/10">
+                        Decline
+                      </button>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+            </ul>
+          </>
+        )
+      ) : (
+        // Newsletter subscribers view
+        <div>
+          {allActiveSubscribers.length === 0 ? (
+            <div className="text-center text-[var(--text-faint)] py-12">No newsletter subscribers yet.</div>
+          ) : (
+            <>
+              <div className="mb-3 flex items-center gap-2 flex-wrap">
+                <button
+                  onClick={() => copyToClipboard(
+                    allActiveSubscribers.map((s) => s.email).join(', '),
+                    `${allActiveSubscribers.length} email${allActiveSubscribers.length === 1 ? '' : 's'}`
+                  )}
+                  className="text-[11px] font-mono uppercase tracking-wider px-3 py-1.5 rounded bg-[var(--hop)] text-[#0a1a02]">
+                  Copy all {allActiveSubscribers.length} emails
+                </button>
+                <button
+                  onClick={() => {
+                    const csv = buildCsv(subscribers, [
+                      ['email',           'email'],
+                      ['source',          'source'],
+                      ['subscribed_at',   'subscribed_at'],
+                      ['unsubscribed_at', 'unsubscribed_at'],
+                      ['notes',           'notes'],
+                    ]);
+                    downloadFile(`igb-newsletter-${ymd()}.csv`, csv);
+                  }}
+                  className="text-[11px] font-mono uppercase tracking-wider px-3 py-1.5 rounded border border-[var(--hop)] text-[var(--hop)] hover:bg-[#6dc13510]">
+                  ↓ Export CSV ({subscribers.length})
+                </button>
+                <span className="text-[11px] font-mono text-[var(--text-faint)]">
+                  · paste into bcc, or import to Mailchimp
+                </span>
               </div>
-              <div className="flex gap-2 mt-3 flex-wrap">
-                {it.status !== 'open' && (
-                  <button onClick={() => setStatus(it, 'open')}
-                    className="text-[10px] font-mono uppercase tracking-wider px-2 py-1 rounded border border-[var(--line)] text-[var(--text-dim)] hover:border-[var(--text-faint)]">
-                    Reopen
-                  </button>
-                )}
-                {it.status !== 'ordered' && (
-                  <button onClick={() => setStatus(it, 'ordered')}
-                    className="text-[10px] font-mono uppercase tracking-wider px-2 py-1 rounded border border-[var(--warn)] text-[var(--warn)] hover:bg-[#fbbf2410]">
-                    Mark ordered
-                  </button>
-                )}
-                {it.status !== 'acquired' && (
-                  <button onClick={() => setStatus(it, 'acquired')}
-                    className="text-[10px] font-mono uppercase tracking-wider px-2 py-1 rounded border border-[var(--hop)] text-[var(--hop)] hover:bg-[#6dc13510]">
-                    Mark acquired
-                  </button>
-                )}
-                {it.status !== 'declined' && (
-                  <button onClick={() => setStatus(it, 'declined')}
-                    className="text-[10px] font-mono uppercase tracking-wider px-2 py-1 rounded border border-red-800 text-red-400 hover:bg-red-900/10">
-                    Decline
-                  </button>
-                )}
-              </div>
-            </li>
-          ))}
-        </ul>
+              <ul className="space-y-1.5">
+                {subscribers.map((s) => (
+                  <li key={s.email}
+                    className={`flex items-center gap-2 p-2 rounded border ${
+                      s.unsubscribed_at ? 'border-[var(--line)] opacity-50' : 'border-[var(--line)] bg-[var(--bg-elev)]'
+                    }`}>
+                    <span className="font-mono text-sm text-[var(--text)] flex-1 truncate">{s.email}</span>
+                    <span className="font-mono text-[10px] text-[var(--text-faint)] uppercase tracking-wider">
+                      {s.unsubscribed_at ? 'unsub' : new Date(s.subscribed_at).toLocaleDateString()}
+                    </span>
+                    {!s.unsubscribed_at && (
+                      <button onClick={() => unsubscribe(s)}
+                        className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded text-[var(--text-faint)] hover:text-red-400">
+                        Unsub
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-4 text-[10px] text-[var(--text-faint)] leading-relaxed">
+                Subscribers come from the wishlist newsletter checkbox. Use the
+                "Copy all" button to grab the list and paste into bcc when sending
+                from your email client. (No automated sending from here yet.)
+              </p>
+            </>
+          )}
+        </div>
       )}
     </div>
   );
