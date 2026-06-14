@@ -174,6 +174,45 @@
   }
   .queue-flash-glow { animation: queue-flash-glow 2.2s ease-in-out; }
 
+  /* Random Groove — slot-machine roulette of album covers */
+  @keyframes rg-spin {
+    0%   { transform: translateY(0); }
+    100% { transform: translateY(var(--rg-distance, -3000px)); }
+  }
+  .rg-reel {
+    display: flex; flex-direction: column;
+    animation: rg-spin var(--rg-duration, 4.5s) cubic-bezier(0.08, 0.5, 0.15, 1) forwards;
+    will-change: transform;
+  }
+  /* The result reveal — hop-green wash pulse + bounce-in */
+  @keyframes rg-reveal {
+    0%   { transform: scale(0.6); opacity: 0; filter: brightness(1.6); }
+    55%  { transform: scale(1.08); opacity: 1; filter: brightness(1.3); }
+    100% { transform: scale(1); opacity: 1; filter: brightness(1); }
+  }
+  .rg-reveal { animation: rg-reveal 0.55s cubic-bezier(0.2, 0.8, 0.2, 1) backwards; }
+
+  @keyframes rg-glow {
+    0%, 100% { box-shadow: 0 0 0 var(--hop-glow), 0 0 24px var(--hop-glow); }
+    50%      { box-shadow: 0 0 60px #6dc135, 0 0 100px var(--hop-glow); }
+  }
+  .rg-glow { animation: rg-glow 1.6s ease-in-out infinite; }
+
+  /* Backdrop flash when result lands */
+  @keyframes rg-flash {
+    0%   { background-color: rgba(0,0,0,0.85); }
+    20%  { background-color: rgba(109,193,53,0.35); }
+    100% { background-color: rgba(0,0,0,0.85); }
+  }
+  .rg-flash-bg { animation: rg-flash 0.7s ease-out; }
+
+  /* The Random Groove launch button — make it feel inviting */
+  @keyframes rg-pulse {
+    0%, 100% { box-shadow: 0 0 18px rgba(109,193,53,0.45); }
+    50%      { box-shadow: 0 0 28px rgba(109,193,53,0.85); }
+  }
+  .rg-launch { animation: rg-pulse 2.4s ease-in-out infinite; }
+
   /* Hide elements outside the safe area on iPhone */
   .safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
 
@@ -400,6 +439,7 @@ function BrowseTab({ inventory, loading, queueEnabled }) {
   const [showAllGenres, setShowAllGenres] = useState(false);
   const [randomSeed, setRandomSeed] = useState(0);
   const [selected, setSelected] = useState(null);
+  const [showRandomGroove, setShowRandomGroove] = useState(false);
 
   // Derive available genres + decades from the inventory
   const { topGenres, allGenres, decades } = useMemo(() => {
@@ -455,6 +495,18 @@ function BrowseTab({ inventory, loading, queueEnabled }) {
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-4">
+      {/* Random Groove launch — only when queue is on */}
+      {queueEnabled === true && (
+        <button
+          onClick={() => setShowRandomGroove(true)}
+          className="rg-launch w-full mb-4 py-3 rounded-lg bg-gradient-to-r from-[#6dc135] to-[#8fd960] text-[#0a1a02] font-display text-2xl tracking-wider hover:brightness-110 transition flex items-center justify-center gap-2"
+        >
+          <span className="text-2xl">🎲</span>
+          <span>Random Groove</span>
+          <span className="font-mono text-[10px] tracking-widest opacity-70 ml-1">LET FATE PICK</span>
+        </button>
+      )}
+
       {/* Search */}
       <div className="relative mb-4">
         <input
@@ -584,6 +636,17 @@ function BrowseTab({ inventory, loading, queueEnabled }) {
       )}
 
       {selected && <AlbumDetail record={selected} onClose={() => setSelected(null)} queueEnabled={queueEnabled} />}
+      {showRandomGroove && (
+        <RandomGrooveModal
+          inventory={inventory}
+          onClose={() => setShowRandomGroove(false)}
+          onLockIn={(record) => {
+            // Close the spin modal and open the chosen album's detail/request flow
+            setShowRandomGroove(false);
+            setSelected(record);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -2403,6 +2466,159 @@ function usePlayQueue() {
   }, [queue]);
 
   return { queue: sorted, loading, reload: load };
+}
+
+// ----------------------------------------------------------------------------
+// RANDOM GROOVE MODAL — slot-machine reel that picks an album from the stacks
+// ----------------------------------------------------------------------------
+function RandomGrooveModal({ inventory, onClose, onLockIn }) {
+  // Pull only records that are available (not damaged/missing) to spin on
+  const pool = useMemo(() => {
+    return inventory.filter((r) => !r.status || r.status === 'available' || r.status === 'featured' || r.status === 'playing');
+  }, [inventory]);
+
+  const [phase, setPhase] = useState('spinning');   // 'spinning' | 'revealed'
+  const [result, setResult] = useState(null);
+  const [reelItems, setReelItems] = useState([]);
+  const [flashKey, setFlashKey] = useState(0);
+
+  // Pick a result + build a long reel of random covers that ends on the result
+  const startSpin = useCallback(() => {
+    if (pool.length === 0) return;
+    const pick = pool[Math.floor(Math.random() * pool.length)];
+    // Build a longer reel for a meatier spin: ~50 random covers, with the
+    // final one being the pick. More covers + longer animation = more drama.
+    const reel = [];
+    for (let i = 0; i < 50; i++) {
+      reel.push(pool[Math.floor(Math.random() * pool.length)]);
+    }
+    reel[reel.length - 1] = pick;       // last item is the chosen one
+    setResult(pick);
+    setReelItems(reel);
+    setPhase('spinning');
+    setFlashKey((k) => k + 1);
+  }, [pool]);
+
+  // Kick off the first spin on mount
+  useEffect(() => { startSpin(); }, [startSpin]);
+
+  // After the reel-spin animation, reveal the result.
+  // CSS animation runs ~4.5s; we transition phase right at the end.
+  useEffect(() => {
+    if (phase !== 'spinning') return;
+    const t = setTimeout(() => setPhase('revealed'), 4550);
+    return () => clearTimeout(t);
+  }, [phase, flashKey]);
+
+  // Esc to close
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  if (pool.length === 0) {
+    return (
+      <div className="fixed inset-0 z-[60] flex items-center justify-center scrim-anim p-4"
+        style={{ background: 'rgba(0,0,0,0.85)' }}
+        onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+        <div className="bg-[var(--bg-elev)] border border-[var(--line)] rounded-2xl p-6 max-w-sm text-center">
+          <div className="font-display text-2xl glow-pulse mb-2">No records to spin</div>
+          <p className="text-sm text-[var(--text-dim)] mb-4">The stacks look empty — try again once records are added.</p>
+          <button onClick={onClose} className="px-4 py-2 rounded-lg border border-[var(--line)]">Close</button>
+        </div>
+      </div>
+    );
+  }
+
+  // The reel cell size — square covers at ~144px on mobile, 180px desktop
+  // Each cell is reel-cell-size tall. The reel translates up by
+  // (reelItems.length - 1) * cellSize so the last cell lands centered.
+  const CELL = 144;     // px (mobile)
+  const distance = (reelItems.length - 1) * CELL;
+
+  return (
+    <div key={flashKey}
+      className={`fixed inset-0 z-[60] flex items-center justify-center p-4 scrim-anim ${phase === 'revealed' ? 'rg-flash-bg' : ''}`}
+      style={{ background: 'rgba(0,0,0,0.88)', backdropFilter: 'blur(6px)' }}
+      onClick={(e) => { if (e.target === e.currentTarget && phase === 'revealed') onClose(); }}>
+      <div className="bg-[var(--bg-elev)] border border-[var(--line)] rounded-2xl w-full max-w-sm p-5 safe-bottom relative overflow-hidden">
+
+        {/* Header */}
+        <div className="text-center mb-4">
+          <div className="font-mono text-[10px] tracking-[0.25em] uppercase text-[var(--text-faint)]">
+            Inner Groove · Fate Decides
+          </div>
+          <h2 className="font-display text-4xl glow-pulse leading-none mt-0.5">
+            Random Groove
+          </h2>
+        </div>
+
+        {/* Reel / Result viewport */}
+        <div className="relative mx-auto mb-5"
+          style={{ width: `${CELL}px`, height: `${CELL}px` }}>
+          {/* Outer frame with hop-green border */}
+          <div className={`absolute inset-0 rounded-xl border-2 border-[var(--hop)] overflow-hidden ${phase === 'revealed' ? 'rg-glow' : ''}`}
+            style={{ boxShadow: '0 0 24px var(--hop-glow)' }}>
+            {/* Spinning reel */}
+            {phase === 'spinning' && reelItems.length > 0 && (
+              <div className="rg-reel"
+                style={{ '--rg-distance': `-${distance}px`, '--rg-duration': '4.5s' }}>
+                {reelItems.map((r, i) => (
+                  <div key={i} className="flex-shrink-0" style={{ width: `${CELL}px`, height: `${CELL}px` }}>
+                    <CoverImage src={r.cover_url} alt="" />
+                  </div>
+                ))}
+              </div>
+            )}
+            {/* Revealed result — replaces the reel so we get a clean bounce */}
+            {phase === 'revealed' && result && (
+              <div className="rg-reveal absolute inset-0" style={{ width: `${CELL}px`, height: `${CELL}px` }}>
+                <CoverImage src={result.cover_url} alt={result.album} />
+              </div>
+            )}
+          </div>
+          {/* Subtle scan-line overlay during spin for that slot-machine feel */}
+          {phase === 'spinning' && (
+            <div className="pointer-events-none absolute inset-0 rounded-xl"
+              style={{ background: 'linear-gradient(to bottom, rgba(0,0,0,0.55) 0%, transparent 30%, transparent 70%, rgba(0,0,0,0.55) 100%)' }} />
+          )}
+        </div>
+
+        {/* Spinning vs revealed footer */}
+        {phase === 'spinning' ? (
+          <div className="text-center">
+            <div className="font-mono text-xs text-[var(--text-faint)] tracking-wider uppercase animate-pulse">
+              Spinning the stacks…
+            </div>
+          </div>
+        ) : (
+          <div className="text-center">
+            <div className="font-mono text-[10px] tracking-[0.25em] uppercase text-[var(--hop)] mb-1">
+              Fate has spoken
+            </div>
+            <div className="font-display text-2xl text-[var(--text)] leading-tight">{clean(result.album)}</div>
+            <div className="text-sm text-[var(--text-dim)] mb-5">{clean(result.artist)}</div>
+
+            <button onClick={() => onLockIn(result)}
+              className="w-full py-3 rounded-lg bg-[var(--hop)] text-[#0a1a02] font-display text-2xl tracking-wider hover:brightness-110 transition shadow-[0_0_24px_var(--hop-glow)]">
+              🔒 Lock it in!
+            </button>
+            <div className="flex gap-2 mt-2">
+              <button onClick={startSpin}
+                className="flex-1 py-2.5 rounded-lg border border-[var(--line)] text-[var(--text)] font-display tracking-wider hover:border-[var(--hop)] hover:text-[var(--hop)] transition">
+                🎲 Spin again
+              </button>
+              <button onClick={onClose}
+                className="flex-1 py-2.5 rounded-lg border border-[var(--line)] text-[var(--text-dim)] hover:text-[var(--text)] transition">
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 // ----------------------------------------------------------------------------
