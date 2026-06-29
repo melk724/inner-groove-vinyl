@@ -497,17 +497,15 @@ function BrowseTab({ inventory, loading, queueEnabled }) {
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-4">
-      {/* Random Groove launch — only when queue is on */}
-      {queueEnabled === true && (
-        <button
-          onClick={() => setShowRandomGroove(true)}
-          className="rg-launch w-full mb-4 py-3 rounded-lg bg-gradient-to-r from-[#6dc135] to-[#8fd960] text-[#0a1a02] font-display text-2xl tracking-wider hover:brightness-110 transition flex items-center justify-center gap-2"
-        >
-          <span className="text-2xl">🎲</span>
-          <span>Random Groove</span>
-          <span className="font-mono text-[10px] tracking-widest opacity-70 ml-1">LET FATE PICK</span>
-        </button>
-      )}
+      {/* Random Groove launch — always available (queue on or off) */}
+      <button
+        onClick={() => setShowRandomGroove(true)}
+        className="rg-launch w-full mb-4 py-3 rounded-lg bg-gradient-to-r from-[#6dc135] to-[#8fd960] text-[#0a1a02] font-display text-2xl tracking-wider hover:brightness-110 transition flex items-center justify-center gap-2"
+      >
+        <span className="text-2xl">🎲</span>
+        <span>Random Groove</span>
+        <span className="font-mono text-[10px] tracking-widest opacity-70 ml-1">LET FATE PICK</span>
+      </button>
 
       {/* Search */}
       <div className="relative mb-4">
