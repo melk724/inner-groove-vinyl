@@ -239,6 +239,8 @@ const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFz
 
 // Admin route config — only used on /admin
 const ADMIN_PIN          = '15147';
+// Separate PIN gating the Scan / Add-manually tabs on /bar
+const BAR_ADD_PIN        = '8334';
 const DISCOGS_LOOKUP_URL = `${SUPABASE_URL}/functions/v1/discogs-lookup`;
 
 const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON, {
@@ -2987,7 +2989,58 @@ function DisplayQueuePanel({ queue, flash }) {
 }
 
 // ----------------------------------------------------------------------------
-// BAR APP — bartender queue manager (/bar), no PIN
+// Inline PIN gate for the Scan / Add-manually tabs on the bar page. Reuses the
+// staff ADMIN_PIN and the same sessionStorage unlock flag as /admin.
+// ----------------------------------------------------------------------------
+function BarAddGate({ onUnlock }) {
+  const [pin, setPin] = useState('');
+  const [err, setErr] = useState('');
+  const [shake, setShake] = useState(false);
+
+  const submit = (e) => {
+    e?.preventDefault?.();
+    if (pin === BAR_ADD_PIN) {
+      try { sessionStorage.setItem('igb_vinyl_bar_unlocked', '1'); } catch {}
+      onUnlock();
+    } else {
+      setErr('Wrong PIN');
+      setShake(true);
+      setTimeout(() => setShake(false), 400);
+      setPin('');
+    }
+  };
+
+  return (
+    <div className="max-w-xs mx-auto px-4 py-10">
+      <form onSubmit={submit} className={shake ? 'vote-bump' : ''}>
+        <div className="text-center mb-5">
+          <div className="font-mono text-[10px] tracking-[0.25em] text-[var(--text-faint)] uppercase mb-1">
+            Staff Only
+          </div>
+          <h2 className="font-display text-2xl glow-pulse leading-none">Enter PIN to add records</h2>
+        </div>
+        <input
+          type="password"
+          inputMode="numeric"
+          autoFocus
+          value={pin}
+          onChange={(e) => { setPin(e.target.value); setErr(''); }}
+          placeholder="PIN"
+          className="w-full text-center font-mono text-2xl bg-[var(--bg-elev)] border border-[var(--line)] rounded-lg px-4 py-3 text-[var(--text)] placeholder:text-[var(--text-faint)] focus:outline-none focus:border-[var(--hop)] focus:ring-1 focus:ring-[var(--hop)] tracking-[0.5em]"
+        />
+        {err && <div className="text-center text-sm text-red-400 mt-2">{err}</div>}
+        <button
+          type="submit"
+          className="mt-4 w-full py-3 rounded-lg bg-[var(--hop)] text-[#0a1a02] font-display text-xl tracking-wider hover:brightness-110 transition shadow-[0_0_24px_var(--hop-glow)]"
+        >
+          Unlock
+        </button>
+      </form>
+    </div>
+  );
+}
+
+// BAR APP — bartender queue manager (/bar); Queue is open, Add tabs are PIN-gated
 // ----------------------------------------------------------------------------
 function BarApp() {
   const queueEnabled = useQueueEnabled();
@@ -2995,6 +3048,10 @@ function BarApp() {
   const [history, setHistory] = useState([]);
   const [busy, setBusy] = useState(false);
   const [view, setView] = useState('queue'); // 'queue' | 'scan' | 'manual'
+  const [addUnlocked, setAddUnlocked] = useState(() => {
+    try { return sessionStorage.getItem('igb_vinyl_bar_unlocked') === '1'; }
+    catch { return false; }
+  });
 
   // Load recently-played for context
   const loadHistory = useCallback(async () => {
@@ -3063,8 +3120,8 @@ function BarApp() {
         </div>
       </header>
 
-      {view === 'scan'   && <ScanView />}
-      {view === 'manual' && <ManualView />}
+      {view === 'scan'   && (addUnlocked ? <ScanView />   : <BarAddGate onUnlock={() => setAddUnlocked(true)} />)}
+      {view === 'manual' && (addUnlocked ? <ManualView /> : <BarAddGate onUnlock={() => setAddUnlocked(true)} />)}
 
       {view === 'queue' && (
       <div className="max-w-2xl mx-auto px-4 py-4">
