@@ -3038,6 +3038,122 @@ function BarAddGate({ onUnlock }) {
   );
 }
 
+// ----------------------------------------------------------------------------
+// SPORTS ON TV — daily board for the bartender console (/bar)
+// Reads the sports_tv_today table (populated by the sync-sports Edge Function).
+// ----------------------------------------------------------------------------
+const LEAGUE_LABEL = { mlb: 'MLB', nhl: 'NHL', nfl: 'NFL', cfb: 'CFB', cbb: 'CBB', nba: 'NBA' };
+
+function etTodayStr() {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date());
+}
+
+function fmtEastern(iso) {
+  try {
+    return new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit',
+    }).format(new Date(iso));
+  } catch { return ''; }
+}
+
+function SportsTvView() {
+  const [games, setGames] = useState(null); // null = loading
+
+  const load = useCallback(async () => {
+    const { data, error } = await supabase
+      .from('sports_tv_today')
+      .select('*')
+      .eq('game_date', etTodayStr())
+      .order('is_local', { ascending: false })
+      .order('start_time', { ascending: true });
+    if (error) { console.error(error); setGames([]); return; }
+    setGames(data || []);
+  }, []);
+
+  useEffect(() => {
+    load();
+    const ch = supabase
+      .channel('sports_tv_realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'sports_tv_today' }, load)
+      .subscribe();
+    const t = setInterval(load, 5 * 60 * 1000); // backstop refresh for LIVE/Final
+    return () => { supabase.removeChannel(ch); clearInterval(t); };
+  }, [load]);
+
+  return (
+    <div className="max-w-2xl mx-auto px-4 py-4">
+      <div className="flex items-baseline justify-between mb-4">
+        <div className="font-mono text-[10px] tracking-[0.25em] uppercase text-[var(--hop)]">On TV today</div>
+        <div className="font-mono text-[10px] text-[var(--text-faint)]">Comcast · Pittsburgh</div>
+      </div>
+
+      {games === null ? (
+        <div className="flex items-center justify-center py-12"><VinylSpinner /></div>
+      ) : games.length === 0 ? (
+        <div className="text-[var(--text-faint)] text-sm italic py-10 text-center border border-dashed border-[var(--line)] rounded-lg">
+          No tracked games on TV today.
+        </div>
+      ) : (
+        <ul className="space-y-2">
+          {games.map((g) => {
+            const live  = g.status === 'in';
+            const final = g.status === 'post';
+            return (
+              <li key={g.id}
+                className={`flex items-center gap-3 p-3 rounded-lg border ${
+                  g.is_local
+                    ? 'border-[var(--hop-deep)] bg-[#6dc1350a]'
+                    : 'border-[var(--line)] bg-[var(--bg-elev)]'
+                }`}>
+                <div className="font-mono text-[10px] tracking-wider text-[var(--text-faint)] w-9 text-center flex-shrink-0">
+                  {LEAGUE_LABEL[g.league] || (g.league || '').toUpperCase()}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-[var(--text)] text-sm leading-tight truncate">
+                    <span className={g.is_local ? 'font-semibold' : ''}>{g.away_team}</span>
+                    <span className="text-[var(--text-faint)]"> @ </span>
+                    <span className={g.is_local ? 'font-semibold' : ''}>{g.home_team}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 mt-1">
+                    {g.is_local && (
+                      <span className="inline-flex items-center px-1.5 h-5 rounded bg-[var(--hop)] text-[#0a1a02] font-display text-xs leading-none tracking-wide">LOCAL</span>
+                    )}
+                    {g.network && (
+                      <span className="font-mono text-[10px] text-[var(--text-dim)] truncate">
+                        {g.network}{g.channel ? ` · ch ${g.channel}` : ''}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div className="flex-shrink-0 text-right">
+                  {live ? (
+                    <span className="inline-flex items-center gap-1 font-display text-lg text-red-400">
+                      <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" /> LIVE
+                    </span>
+                  ) : final ? (
+                    <span className="font-display text-lg text-[var(--text-faint)]">Final</span>
+                  ) : (
+                    <div>
+                      <span className="font-display text-lg text-[var(--text)]">{fmtEastern(g.start_time)}</span>
+                      <div className="font-mono text-[9px] text-[var(--text-faint)] uppercase tracking-wider -mt-0.5">ET</div>
+                    </div>
+                  )}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+
+      <div className="mt-4 text-center font-mono text-[9px] text-[var(--text-faint)] tracking-wider">
+        Schedule via ESPN · channels may vary
+      </div>
+    </div>
+  );
+}
+
 // BAR APP — bartender queue manager (/bar); Queue is open, Add tabs are PIN-gated
 // ----------------------------------------------------------------------------
 function BarApp() {
@@ -3104,6 +3220,7 @@ function BarApp() {
               ['queue',  'Queue'],
               ['scan',   'Scan'],
               ['manual', 'Add manually'],
+              ['ontv',   'On TV'],
             ].map(([k, label]) => (
               <button
                 key={k}
@@ -3120,6 +3237,7 @@ function BarApp() {
 
       {view === 'scan'   && (addUnlocked ? <ScanView />   : <BarAddGate onUnlock={() => setAddUnlocked(true)} />)}
       {view === 'manual' && (addUnlocked ? <ManualView /> : <BarAddGate onUnlock={() => setAddUnlocked(true)} />)}
+      {view === 'ontv'   && <SportsTvView />}
 
       {view === 'queue' && (
       <div className="max-w-2xl mx-auto px-4 py-4">
