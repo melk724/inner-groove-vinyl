@@ -789,7 +789,7 @@ function AlbumDetail({ record, onClose, queueEnabled }) {
                     {tracks.map((t, i) => (
                       <li
                         key={`${side}-${i}`}
-                        className="flex items-center gap-3 px-3 py-2 border-b border-[var(--line)] last:border-b-0 text-sm hover:bg-[var(--bg-card)] transition"
+                        className="flex items-center gap-3 px-3 py-2 border-b border-[var(--line)] last:border-b-0 text-sm"
                       >
                         <span className="font-mono text-[10px] text-[var(--text-faint)] w-6 tabular-nums">
                           {t.position || i + 1}
@@ -1271,6 +1271,8 @@ function AdminHeader({ view, setView }) {
         </div>
         <nav className="flex gap-5 -mb-px overflow-x-auto">
           {[
+            ['scan',     'Scan'],
+            ['manual',   'Add manually'],
             ['inventory','Manage'],
             ['wishlist', 'Wishlist'],
             ['slides',   'Slides'],
@@ -2340,13 +2342,15 @@ function AdminApp() {
     try { return sessionStorage.getItem('igb_vinyl_admin_unlocked') === '1'; }
     catch { return false; }
   });
-  const [view, setView] = useState('inventory');
+  const [view, setView] = useState('scan');
 
   if (!unlocked) return <PinGate onUnlock={() => setUnlocked(true)} />;
 
   return (
     <>
       <AdminHeader view={view} setView={setView} />
+      {view === 'scan'      && <ScanView />}
+      {view === 'manual'    && <ManualView />}
       {view === 'inventory' && <InventoryView />}
       {view === 'wishlist'  && <WishlistAdminView />}
       {view === 'slides'    && <SlidesView />}
