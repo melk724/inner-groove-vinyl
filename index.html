@@ -3172,6 +3172,139 @@ function SportsTvView() {
 
 // BAR APP — bartender queue manager (/bar); Queue is open, Add tabs are PIN-gated
 // ----------------------------------------------------------------------------
+// ----------------------------------------------------------------------------
+// START OF SHIFT — clock-in walkthrough + in-app guide popups (/bar)
+// SHIFT_GUIDES point at the static HTML guides published under /guides/.
+// EDIT these URLs to match the filenames you upload to the repo's guides/ folder.
+// ----------------------------------------------------------------------------
+const SHIFT_GUIDES = {
+  tv:    { label: 'TV / Display Setup', url: '/guides/tv-setup.html' },
+  quick: { label: 'Quick Guide',        url: '/guides/quick-guide.html' },
+  full:  { label: 'Full Guide',         url: '/guides/full-guide.html' },
+  card:  { label: 'Bar Card',           url: '/guides/bar-card.html' },
+};
+
+// Popup that shows a published guide in an on-screen modal (iframe).
+function GuideModal({ guide, onClose }) {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.removeEventListener('keydown', onKey); document.body.style.overflow = prev; };
+  }, [onClose]);
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-stretch sm:items-center justify-center scrim-anim"
+      style={{ background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(4px)' }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="relative bg-[var(--bg-elev)] border border-[var(--line)] sm:rounded-2xl w-full sm:max-w-3xl h-full sm:h-[88vh] flex flex-col overflow-hidden">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--line)] flex-shrink-0">
+          <div className="font-display text-xl text-[var(--text)]">{guide.label}</div>
+          <div className="flex items-center gap-3">
+            <a href={guide.url} target="_blank" rel="noopener noreferrer"
+              className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-dim)] hover:text-[var(--hop)] transition">Open ↗</a>
+            <button onClick={onClose} aria-label="Close"
+              className="w-9 h-9 flex items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/80 transition">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 6l12 12M6 18L18 6" />
+              </svg>
+            </button>
+          </div>
+        </div>
+        <iframe src={guide.url} title={guide.label} className="flex-1 w-full bg-white" />
+      </div>
+    </div>
+  );
+}
+
+// The clock-in walkthrough itself.
+function StartOfShiftModal({ onClose, onOpenGuide }) {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.removeEventListener('keydown', onKey); document.body.style.overflow = prev; };
+  }, [onClose]);
+
+  const steps = [
+    {
+      n: 1, title: 'Power on the displays',
+      body: 'Turn on the taproom TVs. On each display device, open the browser to the /display screen. First-time setup or a blank TV? Open the TV / Display guide.',
+      guide: 'tv',
+    },
+    {
+      n: 2, title: 'Turn the queue ON',
+      body: 'On this tablet, go to the Queue tab and flip the master toggle to ON. While the queue is off, the TVs show slides only and guests can\u2019t send requests.',
+      guide: 'quick',
+    },
+    {
+      n: 3, title: 'Monitor the queue here',
+      body: 'Keep this tablet on the Queue tab during your shift. Tap Play when a record goes on, Done when it finishes, Skip to clear one. New requests appear live.',
+      guide: 'full',
+    },
+  ];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center scrim-anim"
+      style={{ background: 'rgba(0,0,0,0.82)', backdropFilter: 'blur(4px)' }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="sheet-anim relative bg-[var(--bg-elev)] border-t sm:border border-[var(--line)] rounded-t-2xl sm:rounded-2xl w-full sm:max-w-lg max-h-[92vh] overflow-y-auto safe-bottom">
+        <button onClick={onClose} aria-label="Close"
+          className="absolute top-3 right-3 z-10 w-9 h-9 flex items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/80 transition">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6 6l12 12M6 18L18 6" />
+          </svg>
+        </button>
+
+        <div className="px-5 pt-5 pb-3">
+          <div className="font-mono text-[10px] tracking-[0.25em] uppercase text-[var(--text-faint)] mb-1">IGB · Bartender</div>
+          <h2 className="font-display text-3xl glow-pulse leading-none">Start of shift</h2>
+          <p className="text-sm text-[var(--text-dim)] mt-2">Three quick steps to get the room going.</p>
+        </div>
+
+        <div className="px-5 pb-4 space-y-3">
+          {steps.map((s) => (
+            <div key={s.n} className="flex gap-3 p-3 rounded-lg border border-[var(--line)] bg-[var(--bg-card)]">
+              <div className="flex-shrink-0 w-8 h-8 rounded-full bg-[var(--hop)] text-[#0a1a02] font-display text-xl flex items-center justify-center leading-none">{s.n}</div>
+              <div className="flex-1 min-w-0">
+                <div className="font-display text-xl text-[var(--text)] leading-none mb-1">{s.title}</div>
+                <p className="text-sm text-[var(--text-dim)] leading-snug">{s.body}</p>
+                {s.guide && SHIFT_GUIDES[s.guide] && (
+                  <button onClick={() => onOpenGuide(SHIFT_GUIDES[s.guide])}
+                    className="mt-2 inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider px-2.5 py-1 rounded border border-[var(--line)] text-[var(--text-dim)] hover:border-[var(--hop)] hover:text-[var(--hop)] transition">
+                    📄 {SHIFT_GUIDES[s.guide].label}
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="px-5 pb-5">
+          <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--text-faint)] mb-2">All guides</div>
+          <div className="flex flex-wrap gap-2">
+            {Object.values(SHIFT_GUIDES).map((g) => (
+              <button key={g.url} onClick={() => onOpenGuide(g)}
+                className="inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider px-3 py-1.5 rounded border border-[var(--line)] text-[var(--text-dim)] hover:border-[var(--hop)] hover:text-[var(--hop)] transition">
+                {g.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="px-5 pb-6">
+          <button onClick={onClose}
+            className="w-full py-3 rounded-lg bg-[var(--hop)] text-[#0a1a02] font-display text-2xl tracking-wider hover:brightness-110 transition shadow-[0_0_24px_var(--hop-glow)]">
+            Let&rsquo;s go
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function BarApp() {
   const queueEnabled = useQueueEnabled();
   const { queue, reload } = usePlayQueue();
@@ -3182,6 +3315,8 @@ function BarApp() {
     try { return sessionStorage.getItem('igb_vinyl_bar_unlocked') === '1'; }
     catch { return false; }
   });
+  const [startOpen, setStartOpen] = useState(false);
+  const [activeGuide, setActiveGuide] = useState(null);
 
   // Load recently-played for context
   const loadHistory = useCallback(async () => {
@@ -3227,8 +3362,14 @@ function BarApp() {
     <div className="min-h-screen bg-[var(--bg)]">
       <header className="sticky top-0 z-40 bg-[var(--bg)]/90 backdrop-blur-md border-b border-[var(--line)]">
         <div className="max-w-2xl mx-auto px-4 pt-3 pb-0">
-          <div className="font-mono text-[10px] tracking-[0.25em] uppercase text-[var(--text-faint)]">
-            IGB · Bartender
+          <div className="flex items-center justify-between">
+            <div className="font-mono text-[10px] tracking-[0.25em] uppercase text-[var(--text-faint)]">
+              IGB · Bartender
+            </div>
+            <button onClick={() => setStartOpen(true)}
+              className="font-mono text-[10px] uppercase tracking-wider px-2.5 py-1 rounded border border-[var(--line)] text-[var(--text-dim)] hover:border-[var(--hop)] hover:text-[var(--hop)] transition">
+              ▶ Start of shift
+            </button>
           </div>
           <h1 className="font-display text-3xl glow-pulse leading-none mb-3">Vinyl Queue</h1>
           <nav className="flex gap-5 -mb-px overflow-x-auto">
@@ -3254,6 +3395,9 @@ function BarApp() {
       {view === 'scan'   && (addUnlocked ? <ScanView />   : <BarAddGate onUnlock={() => setAddUnlocked(true)} />)}
       {view === 'manual' && (addUnlocked ? <ManualView /> : <BarAddGate onUnlock={() => setAddUnlocked(true)} />)}
       {view === 'ontv'   && <SportsTvView />}
+
+      {startOpen && <StartOfShiftModal onClose={() => setStartOpen(false)} onOpenGuide={setActiveGuide} />}
+      {activeGuide && <GuideModal guide={activeGuide} onClose={() => setActiveGuide(null)} />}
 
       {view === 'queue' && (
       <div className="max-w-2xl mx-auto px-4 py-4">
