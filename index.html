@@ -2992,10 +2992,14 @@ function DisplayQueuePanel({ queue, flash }) {
         )}
       </div>
 
-      {/* Footer */}
-      <div className="px-5 py-3 border-t border-[var(--line)] text-center">
-        <div className="font-mono text-[9px] tracking-[0.15em] uppercase text-[var(--text-faint)]">
-          Request a record · inner-groove-vinyl.vercel.app
+      {/* Footer — persistent scan-to-request QR */}
+      <div className="flex items-center gap-3 px-5 py-3 border-t border-[var(--line)]">
+        <StacksQR size={64} />
+        <div className="flex-1 min-w-0 text-left">
+          <div className="font-display text-xl text-[var(--hop)] leading-none">Scan to request</div>
+          <div className="font-mono text-[9px] tracking-[0.15em] uppercase text-[var(--text-faint)] mt-1 truncate">
+            inner-groove-vinyl.vercel.app
+          </div>
         </div>
       </div>
     </div>
