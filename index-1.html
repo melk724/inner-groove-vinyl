@@ -1,0 +1,3553 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="theme-color" content="#0a0a0a" />
+<title>Inner Groove · Vinyl Collection</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=JetBrains+Mono:wght@400;500&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.7/babel.min.js"></script>
+<script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+<style>
+  :root {
+    --hop:        #6dc135;
+    --hop-glow:   #6dc13580;
+    --hop-deep:   #4a8c1f;
+    --bg:         #0a0a0a;
+    --bg-elev:    #141414;
+    --bg-card:    #1a1a1a;
+    --line:       #262626;
+    --text:       #f5f5f5;
+    --text-dim:   #a3a3a3;
+    --text-faint: #525252;
+    --warn:       #fbbf24;
+    --venmo:      #3d95ce;
+  }
+
+  html, body { background: var(--bg); color: var(--text); }
+  body {
+    font-family: 'Inter', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    overscroll-behavior-y: none;
+    /* Subtle scanline texture for the CRT/turntable vibe */
+    background-image:
+      radial-gradient(ellipse 80% 50% at 50% -20%, #6dc13510 0%, transparent 60%),
+      repeating-linear-gradient(0deg, transparent 0px, transparent 2px, rgba(255,255,255,0.012) 2px, rgba(255,255,255,0.012) 3px);
+  }
+
+  .font-display { font-family: 'Bebas Neue', sans-serif; letter-spacing: 0.02em; }
+  .font-mono    { font-family: 'JetBrains Mono', monospace; }
+
+  /* Reused glowing-pulsing header from the DJ app */
+  @keyframes glow-pulse {
+    0%, 100% { text-shadow: 0 0 8px var(--hop-glow), 0 0 20px #6dc13540, 0 0 40px #6dc13520; }
+    50%      { text-shadow: 0 0 12px var(--hop), 0 0 28px #6dc13560, 0 0 60px #6dc13540; }
+  }
+  .glow-pulse { color: var(--hop); animation: glow-pulse 3s ease-in-out infinite; }
+
+  /* Vinyl-spin loader */
+  @keyframes spin-record { to { transform: rotate(360deg); } }
+  .spin-record { animation: spin-record 2.4s linear infinite; }
+
+  /* Stagger for grid load */
+  @keyframes fade-rise {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .fade-rise { animation: fade-rise 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+
+  /* Custom scrollbar — barely there */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--line); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--text-faint); }
+
+  /* Filter chips */
+  .chip {
+    display: inline-flex; align-items: center; gap: 0.375rem;
+    padding: 0.4rem 0.75rem;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--text-dim);
+    background: var(--bg-elev);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+  }
+  .chip:hover { border-color: var(--hop-deep); color: var(--text); }
+  .chip[data-active="true"] {
+    background: var(--hop);
+    border-color: var(--hop);
+    color: #0a1a02;
+    font-weight: 600;
+  }
+
+  /* Cover art frame */
+  .cover-frame {
+    position: relative;
+    aspect-ratio: 1;
+    background: var(--bg-elev);
+    overflow: hidden;
+  }
+  .cover-frame img {
+    width: 100%; height: 100%;
+    object-fit: cover;
+    transition: transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  .album-card:hover .cover-frame img { transform: scale(1.04); }
+  .album-card:hover .cover-frame::after {
+    opacity: 1;
+  }
+  .cover-frame::after {
+    content: '';
+    position: absolute; inset: 0;
+    background: linear-gradient(135deg, transparent 60%, var(--hop-glow));
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    pointer-events: none;
+  }
+
+  /* Tab underline */
+  .tab-active {
+    color: var(--hop);
+    border-bottom: 2px solid var(--hop);
+    box-shadow: 0 1px 0 0 var(--hop), 0 4px 24px -4px var(--hop-glow);
+  }
+
+  /* Side badge */
+  .side-badge {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 1.75rem; height: 1.75rem;
+    border-radius: 999px;
+    background: linear-gradient(135deg, var(--hop) 0%, var(--hop-deep) 100%);
+    color: #0a1a02;
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 1rem;
+    font-weight: 700;
+    box-shadow: 0 0 12px var(--hop-glow);
+  }
+
+  /* Sheet animation for modal */
+  @keyframes sheet-in {
+    from { opacity: 0; transform: translateY(20px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes scrim-in {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+  .sheet-anim { animation: sheet-in 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+  .scrim-anim { animation: scrim-in 0.2s ease both; }
+
+  /* Vote button bump */
+  @keyframes vote-bump {
+    0% { transform: scale(1); }
+    40% { transform: scale(1.18); }
+    100% { transform: scale(1); }
+  }
+  .vote-bump { animation: vote-bump 0.32s cubic-bezier(0.2, 0.8, 0.2, 1); }
+
+  /* Full-panel flash for the display queue when a new request lands.
+     Pulses a hop-green wash across the whole panel a few times. */
+  @keyframes queue-flash {
+    0%, 100% { background-color: var(--bg-elev); }
+    15%      { background-color: #6dc135; }
+    30%      { background-color: var(--bg-elev); }
+    45%      { background-color: #6dc135; }
+    60%      { background-color: var(--bg-elev); }
+    75%      { background-color: #6dc135cc; }
+  }
+  .queue-flash {
+    animation: queue-flash 2.2s ease-in-out;
+  }
+  /* When flashing, make the panel text pop against the green wash */
+  @keyframes queue-flash-glow {
+    0%, 100% { box-shadow: inset 0 0 0 var(--hop-glow); }
+    50%      { box-shadow: inset 0 0 120px #6dc135, 0 0 60px var(--hop-glow); }
+  }
+  .queue-flash-glow { animation: queue-flash-glow 2.2s ease-in-out; }
+
+  /* Random Groove — slot-machine roulette of album covers */
+  @keyframes rg-spin {
+    0%   { transform: translateY(0); }
+    100% { transform: translateY(var(--rg-distance, -3000px)); }
+  }
+  .rg-reel {
+    display: flex; flex-direction: column;
+    animation: rg-spin var(--rg-duration, 4.5s) cubic-bezier(0.08, 0.5, 0.15, 1) forwards;
+    will-change: transform;
+  }
+  /* The result reveal — hop-green wash pulse + bounce-in */
+  @keyframes rg-reveal {
+    0%   { transform: scale(0.6); opacity: 0; filter: brightness(1.6); }
+    55%  { transform: scale(1.08); opacity: 1; filter: brightness(1.3); }
+    100% { transform: scale(1); opacity: 1; filter: brightness(1); }
+  }
+  .rg-reveal { animation: rg-reveal 0.55s cubic-bezier(0.2, 0.8, 0.2, 1) backwards; }
+
+  @keyframes rg-glow {
+    0%, 100% { box-shadow: 0 0 0 var(--hop-glow), 0 0 24px var(--hop-glow); }
+    50%      { box-shadow: 0 0 60px #6dc135, 0 0 100px var(--hop-glow); }
+  }
+  .rg-glow { animation: rg-glow 1.6s ease-in-out infinite; }
+
+  /* Backdrop flash when result lands */
+  @keyframes rg-flash {
+    0%   { background-color: rgba(0,0,0,0.85); }
+    20%  { background-color: rgba(109,193,53,0.35); }
+    100% { background-color: rgba(0,0,0,0.85); }
+  }
+  .rg-flash-bg { animation: rg-flash 0.7s ease-out; }
+
+  /* The Random Groove launch button — make it feel inviting */
+  @keyframes rg-pulse {
+    0%, 100% { box-shadow: 0 0 18px rgba(109,193,53,0.45); }
+    50%      { box-shadow: 0 0 28px rgba(109,193,53,0.85); }
+  }
+  .rg-launch { animation: rg-pulse 2.4s ease-in-out infinite; }
+
+  /* Hide elements outside the safe area on iPhone */
+  .safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+
+  /* Status pill colors */
+  .pill-available { background: #6dc13520; color: var(--hop); border: 1px solid var(--hop-deep); }
+  .pill-playing   { background: #fbbf2420; color: var(--warn); border: 1px solid #b88820; }
+  .pill-damaged   { background: #ef444420; color: #f87171; border: 1px solid #b91c1c; }
+  .pill-missing   { background: #52525220; color: var(--text-dim); border: 1px solid var(--text-faint); }
+  .pill-featured  { background: linear-gradient(90deg, var(--hop) 0%, #fbbf24 100%); color: #0a0a0a; border: none; font-weight: 700; }
+</style>
+</head>
+<body>
+
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useMemo, useRef, useCallback } = React;
+
+// ============================================================================
+// CONFIG — these are PUBLIC values; safe to ship in the frontend
+// ============================================================================
+const SUPABASE_URL  = 'https://gyrfthjhacvoyhfilnjc.supabase.co';
+const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd5cmZ0aGpoYWN2b3loZmlsbmpjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMwMTE1MjMsImV4cCI6MjA4ODU4NzUyM30.cI2df-xYe2X-LzC2L4mrtbuhWasAR7tAEOi9qSY9_rM';
+
+// Admin route config — only used on /admin
+const ADMIN_PIN          = '15147';
+// Separate PIN gating the Scan / Add-manually tabs on /bar
+const BAR_ADD_PIN        = '8334';
+const DISCOGS_LOOKUP_URL = `${SUPABASE_URL}/functions/v1/discogs-lookup`;
+
+const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON, {
+  auth: { persistSession: false },
+});
+
+// ============================================================================
+// HELPERS
+// ============================================================================
+
+/** Stable per-device voter ID for wishlist upvotes (honor system, like DJ app). */
+function getVoterId() {
+  let id;
+  try {
+    id = localStorage.getItem('igb_voter_id');
+    if (!id) {
+      id = crypto.randomUUID();
+      localStorage.setItem('igb_voter_id', id);
+    }
+  } catch {
+    // localStorage blocked — use an ephemeral id (votes won't persist across reloads)
+    id = 'ephemeral-' + Math.random().toString(36).slice(2);
+  }
+  return id;
+}
+
+/** Bucket a year into a decade label like "1970s". */
+function decadeOf(year) {
+  if (!year) return null;
+  const d = Math.floor(year / 10) * 10;
+  return `${d}s`;
+}
+
+/** Strip parenthetical suffixes from artist/album for cleaner display. */
+function clean(text) {
+  return (text || '').replace(/\s+/g, ' ').trim();
+}
+
+/** Compare strings for sort, case-insensitive, ignoring leading "The ". */
+function nameKey(s) {
+  return (s || '').toLowerCase().replace(/^the\s+/, '');
+}
+
+/** Escape a value for safe CSV inclusion. RFC 4180:
+ *  - if the value contains a comma, quote, or newline, wrap in double quotes
+ *  - any internal double quotes get doubled */
+function csvCell(val) {
+  if (val == null) return '';
+  const s = typeof val === 'string' ? val : String(val);
+  if (/[",\r\n]/.test(s)) {
+    return `"${s.replace(/"/g, '""')}"`;
+  }
+  return s;
+}
+
+/** Build a CSV string from a header row + array of objects.
+ *  columns is an array of [key, label] tuples; label is what shows in the
+ *  CSV header, key is the property to read from each row. */
+function buildCsv(rows, columns) {
+  const header = columns.map(([, label]) => csvCell(label)).join(',');
+  const lines  = rows.map((r) =>
+    columns.map(([key]) => csvCell(r[key])).join(',')
+  );
+  // Lead with a UTF-8 BOM so Excel opens it correctly with non-ASCII chars
+  return '\uFEFF' + [header, ...lines].join('\r\n');
+}
+
+/** Trigger a download of `content` as `filename` in the user's browser. */
+function downloadFile(filename, content, mimeType = 'text/csv;charset=utf-8') {
+  const blob = new Blob([content], { type: mimeType });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  // Defer revoke so Safari has time to start the download
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/** Format a Date or ISO string for filename usage: 2026-05-03 */
+function ymd(d = new Date()) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+// ============================================================================
+// SHARED UI BITS
+// ============================================================================
+
+function VinylSpinner({ size = 64 }) {
+  return (
+    <div className="flex items-center justify-center" style={{ width: size, height: size }}>
+      <svg viewBox="0 0 64 64" width={size} height={size} className="spin-record">
+        <defs>
+          <radialGradient id="vinyl-grad" cx="50%" cy="50%" r="50%">
+            <stop offset="0%"  stopColor="#1a1a1a" />
+            <stop offset="60%" stopColor="#0a0a0a" />
+            <stop offset="100%" stopColor="#000" />
+          </radialGradient>
+        </defs>
+        <circle cx="32" cy="32" r="30" fill="url(#vinyl-grad)" />
+        {[28, 24, 20, 16].map((r) => (
+          <circle key={r} cx="32" cy="32" r={r} fill="none" stroke="#262626" strokeWidth="0.5" />
+        ))}
+        <circle cx="32" cy="32" r="10" fill="#6dc135" />
+        <circle cx="32" cy="32" r="2"  fill="#0a0a0a" />
+        <circle cx="32" cy="22" r="0.8" fill="#6dc135" opacity="0.8" />
+      </svg>
+    </div>
+  );
+}
+
+function StatusPill({ status }) {
+  const map = {
+    available: { label: 'Available',  cls: 'pill-available' },
+    playing:   { label: 'On the deck',cls: 'pill-playing'   },
+    damaged:   { label: 'Damaged',    cls: 'pill-damaged'   },
+    missing:   { label: 'Missing',    cls: 'pill-missing'   },
+    featured:  { label: '★ Featured', cls: 'pill-featured'  },
+  };
+  const s = map[status] || map.available;
+  if (status === 'available') return null; // default; no need to clutter
+  return (
+    <span className={`text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded ${s.cls}`}>
+      {s.label}
+    </span>
+  );
+}
+
+function CoverImage({ src, alt }) {
+  const [errored, setErrored] = useState(false);
+  if (!src || errored) {
+    // Fallback: vinyl glyph
+    return (
+      <div className="w-full h-full flex items-center justify-center bg-neutral-900">
+        <VinylSpinner size={48} />
+      </div>
+    );
+  }
+  return <img src={src} alt={alt} loading="lazy" onError={() => setErrored(true)} />;
+}
+
+// ============================================================================
+// HEADER + NAV
+// ============================================================================
+function Header({ tab, setTab }) {
+  return (
+    <header className="sticky top-0 z-40 bg-[var(--bg)]/85 backdrop-blur-md border-b border-[var(--line)]">
+      <div className="max-w-5xl mx-auto px-4 pt-3 pb-0">
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <div className="font-mono text-[10px] tracking-[0.25em] text-[var(--text-faint)] uppercase">
+              Inner Groove Brewing · Verona
+            </div>
+            <h1 className="font-display text-3xl sm:text-4xl glow-pulse leading-none">
+              The Stacks
+            </h1>
+          </div>
+          <div className="text-right">
+            <div className="font-mono text-[10px] text-[var(--text-faint)] uppercase tracking-wider">
+              Vinyl Collection
+            </div>
+          </div>
+        </div>
+        <nav className="flex gap-6 -mb-px">
+          <button
+            onClick={() => setTab('browse')}
+            className={`font-display text-xl pb-2 px-1 transition-colors ${
+              tab === 'browse' ? 'tab-active' : 'text-[var(--text-dim)] hover:text-[var(--text)]'
+            }`}>
+            Browse
+          </button>
+          <button
+            onClick={() => setTab('wishlist')}
+            className={`font-display text-xl pb-2 px-1 transition-colors ${
+              tab === 'wishlist' ? 'tab-active' : 'text-[var(--text-dim)] hover:text-[var(--text)]'
+            }`}>
+            Wishlist
+          </button>
+        </nav>
+      </div>
+    </header>
+  );
+}
+
+// ============================================================================
+// BROWSE TAB
+// ============================================================================
+function BrowseTab({ inventory, loading, queueEnabled }) {
+  const [query, setQuery]       = useState('');
+  const [sort, setSort]         = useState('artist');     // artist | recent | random
+  const [genre, setGenre]       = useState(null);
+  const [decade, setDecade]     = useState(null);
+  const [showAllGenres, setShowAllGenres] = useState(false);
+  const [randomSeed, setRandomSeed] = useState(0);
+  const [selected, setSelected] = useState(null);
+  const [showRandomGroove, setShowRandomGroove] = useState(false);
+
+  // Derive available genres + decades from the inventory
+  const { topGenres, allGenres, decades } = useMemo(() => {
+    const gCount = new Map();
+    const dSet = new Set();
+    for (const r of inventory) {
+      for (const g of (r.genres || [])) {
+        gCount.set(g, (gCount.get(g) || 0) + 1);
+      }
+      const d = decadeOf(r.year);
+      if (d) dSet.add(d);
+    }
+    const sortedGenres = [...gCount.entries()].sort((a, b) => b[1] - a[1]).map(([g]) => g);
+    return {
+      topGenres: sortedGenres.slice(0, 8),
+      allGenres: sortedGenres,
+      decades: [...dSet].sort(),
+    };
+  }, [inventory]);
+
+  // Apply filters + search + sort
+  const filtered = useMemo(() => {
+    let list = inventory;
+    if (query.trim()) {
+      const q = query.toLowerCase();
+      list = list.filter((r) =>
+        r.artist.toLowerCase().includes(q) || r.album.toLowerCase().includes(q)
+      );
+    }
+    if (genre)  list = list.filter((r) => (r.genres || []).includes(genre));
+    if (decade) list = list.filter((r) => decadeOf(r.year) === decade);
+
+    const out = [...list];
+    if (sort === 'artist') {
+      out.sort((a, b) => {
+        const ka = nameKey(a.artist), kb = nameKey(b.artist);
+        if (ka !== kb) return ka.localeCompare(kb);
+        return nameKey(a.album).localeCompare(nameKey(b.album));
+      });
+    } else if (sort === 'recent') {
+      out.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    } else if (sort === 'random') {
+      // Stable shuffle keyed on randomSeed so the order doesn't churn on every render
+      const seed = randomSeed;
+      out.sort((a, b) => {
+        const ha = ((a.id || '').charCodeAt(0) + seed) * 9301 % 233280;
+        const hb = ((b.id || '').charCodeAt(0) + seed) * 9301 % 233280;
+        return ha - hb;
+      });
+    }
+    return out;
+  }, [inventory, query, sort, genre, decade, randomSeed]);
+
+  return (
+    <div className="max-w-5xl mx-auto px-4 py-4">
+      {/* Random Groove launch — always available (queue on or off) */}
+      <button
+        onClick={() => setShowRandomGroove(true)}
+        className="rg-launch w-full mb-4 py-3 rounded-lg bg-gradient-to-r from-[#6dc135] to-[#8fd960] text-[#0a1a02] font-display text-2xl tracking-wider hover:brightness-110 transition flex items-center justify-center gap-2"
+      >
+        <span className="text-2xl">🎲</span>
+        <span>Random Groove</span>
+        <span className="font-mono text-[10px] tracking-widest opacity-70 ml-1">LET FATE PICK</span>
+      </button>
+
+      {/* Search */}
+      <div className="relative mb-4">
+        <input
+          type="search"
+          inputMode="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search artist or album…"
+          className="w-full bg-[var(--bg-elev)] border border-[var(--line)] rounded-lg px-4 py-3 pr-10 text-[var(--text)] placeholder:text-[var(--text-faint)] focus:outline-none focus:border-[var(--hop)] focus:ring-1 focus:ring-[var(--hop)] transition"
+        />
+        <svg className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-[var(--text-faint)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-4.35-4.35M11 19a8 8 0 100-16 8 8 0 000 16z" />
+        </svg>
+      </div>
+
+      {/* Filter row: sort */}
+      <div className="flex items-center gap-2 mb-3 overflow-x-auto pb-1 -mx-4 px-4">
+        <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-faint)] mr-1">Sort</span>
+        {[
+          ['artist', 'A→Z'],
+          ['recent', 'New arrivals'],
+          ['random', 'Surprise me'],
+        ].map(([k, label]) => (
+          <button
+            key={k}
+            className="chip"
+            data-active={sort === k}
+            onClick={() => {
+              setSort(k);
+              if (k === 'random') setRandomSeed(Math.random() * 1000 | 0);
+            }}
+          >
+            {label}
+          </button>
+        ))}
+        {sort === 'random' && (
+          <button className="chip" onClick={() => setRandomSeed(Math.random() * 1000 | 0)}>
+            ↻ Reshuffle
+          </button>
+        )}
+      </div>
+
+      {/* Filter row: genres */}
+      {topGenres.length > 0 && (
+        <div className="flex items-center gap-2 mb-2 overflow-x-auto pb-1 -mx-4 px-4">
+          <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-faint)] mr-1">Genre</span>
+          <button className="chip" data-active={!genre} onClick={() => setGenre(null)}>All</button>
+          {(showAllGenres ? allGenres : topGenres).map((g) => (
+            <button key={g} className="chip" data-active={genre === g} onClick={() => setGenre(genre === g ? null : g)}>
+              {g}
+            </button>
+          ))}
+          {allGenres.length > topGenres.length && (
+            <button className="chip" onClick={() => setShowAllGenres((v) => !v)}>
+              {showAllGenres ? 'Less' : `+${allGenres.length - topGenres.length} more`}
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Filter row: decades */}
+      {decades.length > 0 && (
+        <div className="flex items-center gap-2 mb-4 overflow-x-auto pb-1 -mx-4 px-4">
+          <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-faint)] mr-1">Era</span>
+          <button className="chip" data-active={!decade} onClick={() => setDecade(null)}>All</button>
+          {decades.map((d) => (
+            <button key={d} className="chip" data-active={decade === d} onClick={() => setDecade(decade === d ? null : d)}>
+              {d}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Result count */}
+      <div className="font-mono text-[11px] uppercase tracking-wider text-[var(--text-faint)] mb-3">
+        {loading ? 'Loading…' : `${filtered.length} ${filtered.length === 1 ? 'record' : 'records'}`}
+        {(genre || decade) && (
+          <button
+            onClick={() => { setGenre(null); setDecade(null); }}
+            className="ml-3 text-[var(--hop)] hover:underline"
+          >
+            Clear filters
+          </button>
+        )}
+      </div>
+
+      {/* Grid */}
+      {loading ? (
+        <div className="flex items-center justify-center py-20">
+          <VinylSpinner size={80} />
+        </div>
+      ) : filtered.length === 0 ? (
+        <EmptyState query={query} hasFilters={!!(genre || decade)} />
+      ) : (
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
+          {filtered.map((rec, i) => (
+            <button
+              key={rec.id}
+              onClick={() => setSelected(rec)}
+              className="album-card text-left fade-rise"
+              style={{ animationDelay: `${Math.min(i, 24) * 25}ms` }}
+            >
+              <div className="cover-frame rounded-md border border-[var(--line)]">
+                <CoverImage src={rec.cover_url} alt={`${rec.artist} - ${rec.album}`} />
+                {rec.status && rec.status !== 'available' && (
+                  <div className="absolute top-2 left-2">
+                    <StatusPill status={rec.status} />
+                  </div>
+                )}
+              </div>
+              <div className="mt-2">
+                <div className="text-[13px] font-semibold text-[var(--text)] leading-tight line-clamp-2">
+                  {clean(rec.album)}
+                </div>
+                <div className="text-[12px] text-[var(--text-dim)] leading-tight mt-0.5 line-clamp-1">
+                  {clean(rec.artist)}
+                </div>
+                {rec.year && (
+                  <div className="font-mono text-[10px] text-[var(--text-faint)] mt-1">
+                    {rec.year}
+                  </div>
+                )}
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {selected && <AlbumDetail record={selected} onClose={() => setSelected(null)} queueEnabled={queueEnabled} />}
+      {showRandomGroove && (
+        <RandomGrooveModal
+          inventory={inventory}
+          onClose={() => setShowRandomGroove(false)}
+          onLockIn={(record) => {
+            // Close the spin modal and open the chosen album's detail/request flow
+            setShowRandomGroove(false);
+            setSelected(record);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function EmptyState({ query, hasFilters }) {
+  return (
+    <div className="flex flex-col items-center justify-center py-16 text-center">
+      <VinylSpinner size={64} />
+      <div className="font-display text-2xl mt-4 text-[var(--text-dim)]">
+        {query ? 'No matches' : hasFilters ? 'No records in those filters' : 'The crate is empty'}
+      </div>
+      <p className="text-sm text-[var(--text-faint)] mt-2 max-w-xs">
+        {query
+          ? "Try a different search, or hit the Wishlist tab to request it."
+          : hasFilters
+          ? 'Try clearing some filters.'
+          : 'Records will appear here as they get added.'}
+      </p>
+    </div>
+  );
+}
+
+// ============================================================================
+// ALBUM DETAIL MODAL — tracklist by side, Discogs link, paper-form prompt
+// ============================================================================
+function AlbumDetail({ record, onClose, queueEnabled }) {
+  const sheetRef = useRef(null);
+  const [showRequest, setShowRequest] = useState(false);
+
+  // Esc to close, lock body scroll while open
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prev;
+    };
+  }, [onClose]);
+
+  // Group tracks by side
+  const sides = useMemo(() => {
+    if (!record.tracklist) return [];
+    const groups = new Map();
+    for (const t of record.tracklist) {
+      const s = t.side || '?';
+      if (!groups.has(s)) groups.set(s, []);
+      groups.get(s).push(t);
+    }
+    return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b));
+  }, [record.tracklist]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center scrim-anim"
+      style={{ background: 'rgba(0,0,0,0.78)', backdropFilter: 'blur(4px)' }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div
+        ref={sheetRef}
+        className="sheet-anim relative bg-[var(--bg-elev)] border-t sm:border border-[var(--line)] rounded-t-2xl sm:rounded-2xl w-full sm:max-w-2xl max-h-[92vh] overflow-y-auto safe-bottom"
+      >
+        {/* Sticky back bar */}
+        <div className="sticky top-0 z-20 flex items-center justify-between px-3 py-2 bg-[var(--bg-elev)] border-b border-[var(--line)]">
+          <button
+            onClick={onClose}
+            aria-label="Back to the stacks"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[var(--text-dim)] hover:text-[var(--hop)] font-mono text-xs uppercase tracking-[0.15em] transition"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 6l-6 6 6 6" />
+            </svg>
+            Back
+          </button>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            className="w-9 h-9 flex items-center justify-center rounded-full text-[var(--text-dim)] hover:text-[var(--text)] transition"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 6l12 12M6 18L18 6" />
+            </svg>
+          </button>
+        </div>
+
+        {/* Hero */}
+        <div className="relative p-4 sm:p-6 flex flex-col sm:flex-row gap-5">
+          <div className="w-full sm:w-48 flex-shrink-0">
+            <div className="cover-frame rounded-lg border border-[var(--line)] shadow-[0_8px_32px_rgba(0,0,0,0.5)]">
+              <CoverImage src={record.cover_url} alt={`${record.artist} - ${record.album}`} />
+            </div>
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--text-faint)] mb-1">
+              {record.year || '—'}{record.year && (record.genres?.length || record.styles?.length) ? ' · ' : ''}
+              {(record.genres || []).slice(0, 2).join(' · ')}
+            </div>
+            <h2 className="font-display text-3xl sm:text-4xl text-[var(--text)] leading-none">
+              {clean(record.album)}
+            </h2>
+            <div className="text-lg text-[var(--text-dim)] mt-1">
+              {clean(record.artist)}
+            </div>
+
+            {(record.styles?.length > 0) && (
+              <div className="flex flex-wrap gap-1.5 mt-3">
+                {record.styles.slice(0, 5).map((s) => (
+                  <span key={s} className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded border border-[var(--line)] text-[var(--text-dim)]">
+                    {s}
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {record.status && record.status !== 'available' && (
+              <div className="mt-3"><StatusPill status={record.status} /></div>
+            )}
+
+            <div className="mt-4 flex flex-wrap gap-2">
+              {record.discogs_url && (
+                <a
+                  href={record.discogs_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 text-[12px] font-mono uppercase tracking-wider px-3 py-1.5 rounded border border-[var(--line)] text-[var(--text-dim)] hover:border-[var(--hop)] hover:text-[var(--hop)] transition"
+                >
+                  Discogs ↗
+                </a>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Quick request — smaller button under the cover/title, same action as the full one below */}
+        {queueEnabled === true && (
+          <div className="px-4 sm:px-6 -mt-1 mb-2">
+            <button
+              onClick={() => setShowRequest(true)}
+              className="inline-flex items-center gap-1.5 py-2 px-4 rounded-lg bg-[var(--hop)] text-[#0a1a02] font-display text-lg tracking-wide hover:brightness-110 transition shadow-[0_0_16px_var(--hop-glow)]"
+            >
+              ♪ Request to play
+            </button>
+          </div>
+        )}
+
+        {/* Tracklist by side */}
+        {sides.length > 0 ? (
+          <div className="px-4 sm:px-6 pb-4">
+            <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--text-faint)] mb-3">
+              Tracklist · pick a side
+            </div>
+            <div className="space-y-5">
+              {sides.map(([side, tracks]) => (
+                <div key={side}>
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className="side-badge">{side}</div>
+                    <div className="font-display text-xl text-[var(--text-dim)]">Side {side}</div>
+                    <div className="font-mono text-[10px] text-[var(--text-faint)] ml-auto">
+                      {tracks.length} {tracks.length === 1 ? 'track' : 'tracks'}
+                    </div>
+                  </div>
+                  <ol className="border border-[var(--line)] rounded-md overflow-hidden">
+                    {tracks.map((t, i) => (
+                      <li
+                        key={`${side}-${i}`}
+                        className="flex items-center gap-3 px-3 py-2 border-b border-[var(--line)] last:border-b-0 text-sm"
+                      >
+                        <span className="font-mono text-[10px] text-[var(--text-faint)] w-6 tabular-nums">
+                          {t.position || i + 1}
+                        </span>
+                        <span className="flex-1 truncate text-[var(--text)]">{t.title}</span>
+                        {t.duration && (
+                          <span className="font-mono text-[11px] text-[var(--text-faint)] tabular-nums">
+                            {t.duration}
+                          </span>
+                        )}
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="px-4 sm:px-6 pb-4">
+            <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--text-faint)] mb-3">
+              Tracklist
+            </div>
+            <div className="border border-dashed border-[var(--line)] rounded-md p-4 text-center text-[var(--text-faint)] text-sm">
+              No tracklist on file. Check the sleeve or hit the Discogs link.
+            </div>
+          </div>
+        )}
+
+        {/* Request to play (when queue is on) + paper-slip prompt */}
+        {queueEnabled === true && (
+          <div className="mx-4 sm:mx-6 mb-3">
+            <button
+              onClick={() => setShowRequest(true)}
+              className="w-full py-3 rounded-lg bg-[var(--hop)] text-[#0a1a02] font-display text-2xl tracking-wider hover:brightness-110 transition shadow-[0_0_24px_var(--hop-glow)]"
+            >
+              ♪ Request to play
+            </button>
+          </div>
+        )}
+        <div className="mx-4 sm:mx-6 mb-5 p-4 rounded-lg border border-[var(--hop-deep)] bg-gradient-to-br from-[#6dc13510] to-transparent">
+          <div className="font-display text-xl text-[var(--hop)] glow-pulse leading-none mb-1">
+            Want to hear it?
+          </div>
+          <p className="text-sm text-[var(--text-dim)]">
+            {queueEnabled === true
+              ? 'Tap "Request to play" above to add it to the queue on the big screen — or drop a paper slip at the bar. Either works.'
+              : 'Fill out a paper request slip at the bar. Note the album, the side you want, and your name — the bartender will spin it up when they can.'}
+          </p>
+        </div>
+      </div>
+      {showRequest && (
+        <RequestToPlayModal
+          record={record}
+          onClose={() => setShowRequest(false)}
+          onRequested={() => {}}
+        />
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
+// WISHLIST TAB
+// ============================================================================
+function WishlistTab() {
+  const [items, setItems]     = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [voted, setVoted]     = useState(new Set());
+  const [showAdd, setShowAdd] = useState(false);
+  const [sort, setSort]       = useState('top'); // top | new
+  const voterId = useRef(getVoterId()).current;
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const [{ data: w, error: e1 }, { data: v, error: e2 }] = await Promise.all([
+      supabase.from('vinyl_wishlist').select('*').neq('status', 'declined'),
+      supabase.from('vinyl_wishlist_votes').select('wishlist_id').eq('voter_id', voterId),
+    ]);
+    if (e1) console.error(e1);
+    if (e2) console.error(e2);
+    setItems(w || []);
+    setVoted(new Set((v || []).map((r) => r.wishlist_id)));
+    setLoading(false);
+  }, [voterId]);
+
+  useEffect(() => {
+    load();
+    // Realtime: bumps + new submissions appear live
+    const channel = supabase
+      .channel('vinyl_wishlist_realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'vinyl_wishlist' }, load)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'vinyl_wishlist_votes' }, load)
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [load]);
+
+  const sorted = useMemo(() => {
+    const out = [...items];
+    if (sort === 'top') out.sort((a, b) => b.vote_count - a.vote_count || new Date(b.created_at) - new Date(a.created_at));
+    else                out.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    return out;
+  }, [items, sort]);
+
+  const toggleVote = async (item) => {
+    const has = voted.has(item.id);
+    // Optimistic update
+    setVoted((prev) => {
+      const next = new Set(prev);
+      if (has) next.delete(item.id); else next.add(item.id);
+      return next;
+    });
+    setItems((prev) => prev.map((r) =>
+      r.id === item.id ? { ...r, vote_count: r.vote_count + (has ? -1 : 1) } : r
+    ));
+
+    if (has) {
+      const { error } = await supabase
+        .from('vinyl_wishlist_votes')
+        .delete()
+        .eq('wishlist_id', item.id)
+        .eq('voter_id', voterId);
+      if (error) { console.error(error); load(); }
+    } else {
+      const { error } = await supabase
+        .from('vinyl_wishlist_votes')
+        .insert({ wishlist_id: item.id, voter_id: voterId });
+      if (error) { console.error(error); load(); }
+    }
+  };
+
+  return (
+    <div className="max-w-3xl mx-auto px-4 py-4">
+      {/* Top: intro + add button */}
+      <div className="mb-4">
+        <h2 className="font-display text-3xl text-[var(--text)] leading-none">
+          Don't see what you want?
+        </h2>
+        <p className="text-sm text-[var(--text-dim)] mt-1.5">
+          Suggest an album below. Vote up the ones you'd like to hear — popular
+          requests get added to the collection.
+        </p>
+      </div>
+
+      <button
+        onClick={() => setShowAdd(true)}
+        className="w-full mb-5 py-3 rounded-lg bg-[var(--hop)] text-[#0a1a02] font-display text-2xl tracking-wider hover:brightness-110 transition shadow-[0_0_24px_var(--hop-glow)]"
+      >
+        + Suggest an album
+      </button>
+
+      {/* Sort */}
+      <div className="flex items-center gap-2 mb-3">
+        <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-faint)] mr-1">Sort</span>
+        <button className="chip" data-active={sort === 'top'} onClick={() => setSort('top')}>Most votes</button>
+        <button className="chip" data-active={sort === 'new'} onClick={() => setSort('new')}>Newest</button>
+      </div>
+
+      {loading ? (
+        <div className="flex items-center justify-center py-20">
+          <VinylSpinner size={64} />
+        </div>
+      ) : sorted.length === 0 ? (
+        <div className="border border-dashed border-[var(--line)] rounded-lg p-8 text-center">
+          <div className="font-display text-2xl text-[var(--text-dim)]">No requests yet</div>
+          <p className="text-sm text-[var(--text-faint)] mt-1">Be the first to suggest one.</p>
+        </div>
+      ) : (
+        <ul className="space-y-2">
+          {sorted.map((item) => (
+            <WishlistItem key={item.id} item={item} voted={voted.has(item.id)} onToggle={() => toggleVote(item)} />
+          ))}
+        </ul>
+      )}
+
+      {showAdd && <WishlistAddForm onClose={() => setShowAdd(false)} onAdded={load} />}
+    </div>
+  );
+}
+
+function WishlistItem({ item, voted, onToggle }) {
+  const [bump, setBump] = useState(false);
+  const handleClick = () => {
+    setBump(true);
+    setTimeout(() => setBump(false), 350);
+    onToggle();
+  };
+  return (
+    <li className={`flex items-center gap-3 p-3 rounded-lg border transition ${
+      voted ? 'border-[var(--hop-deep)] bg-[#6dc1350a]' : 'border-[var(--line)] bg-[var(--bg-elev)]'
+    }`}>
+      <button
+        onClick={handleClick}
+        aria-label={voted ? 'Remove your vote' : 'Vote up'}
+        className={`flex flex-col items-center justify-center w-12 h-14 rounded-md border transition ${
+          voted
+            ? 'border-[var(--hop)] bg-[var(--hop)] text-[#0a1a02]'
+            : 'border-[var(--line)] bg-[var(--bg-card)] text-[var(--text-dim)] hover:border-[var(--hop)] hover:text-[var(--hop)]'
+        } ${bump ? 'vote-bump' : ''}`}
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M5 15l7-7 7 7" />
+        </svg>
+        <div className="font-display text-base leading-none mt-0.5 tabular-nums">{item.vote_count}</div>
+      </button>
+
+      <div className="flex-1 min-w-0">
+        <div className="font-semibold text-[var(--text)] leading-tight truncate">
+          {clean(item.album)}
+        </div>
+        <div className="text-sm text-[var(--text-dim)] leading-tight mt-0.5 truncate">
+          {clean(item.artist)}
+          {item.year && <span className="text-[var(--text-faint)]"> · {item.year}</span>}
+        </div>
+        {item.note && (
+          <div className="text-[11px] text-[var(--text-faint)] mt-1 italic line-clamp-2">
+            "{item.note}"{item.submitted_by ? ` — ${item.submitted_by}` : ''}
+          </div>
+        )}
+        {item.status === 'ordered' && (
+          <div className="font-mono text-[10px] uppercase tracking-wider mt-1.5 text-[var(--warn)]">
+            ◉ On order
+          </div>
+        )}
+        {item.status === 'acquired' && (
+          <div className="font-mono text-[10px] uppercase tracking-wider mt-1.5 text-[var(--hop)]">
+            ✓ In the collection
+          </div>
+        )}
+      </div>
+    </li>
+  );
+}
+
+function WishlistAddForm({ onClose, onAdded }) {
+  const [artist, setArtist]   = useState('');
+  const [album, setAlbum]     = useState('');
+  const [name, setName]       = useState('');
+  const [email, setEmail]     = useState('');
+  const [note, setNote]       = useState('');
+  const [notifyOnAcquired, setNotifyOnAcquired]       = useState(true);
+  const [subscribeNewsletter, setSubscribeNewsletter] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [err, setErr] = useState(null);
+
+  const emailLooksValid = (e) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test((e || '').trim());
+
+  const submit = async () => {
+    setErr(null);
+    if (!artist.trim() || !album.trim()) {
+      setErr('Artist and album are required.');
+      return;
+    }
+    if (!email.trim()) {
+      setErr('Email is required so we can let you know if your record gets added.');
+      return;
+    }
+    if (!emailLooksValid(email)) {
+      setErr("That email doesn't look right. Double-check it?");
+      return;
+    }
+    setSubmitting(true);
+    const { error } = await supabase.from('vinyl_wishlist').insert({
+      artist: artist.trim(),
+      album: album.trim(),
+      submitted_by: name.trim() || null,
+      note: note.trim() || null,
+      submitter_email: email.trim().toLowerCase(),
+      notify_on_acquired: notifyOnAcquired,
+      subscribe_newsletter: subscribeNewsletter,
+    });
+    setSubmitting(false);
+    if (error) {
+      console.error(error);
+      if (error.code === '23514' && /email_format/.test(error.message || '')) {
+        setErr("That email doesn't look right. Double-check it?");
+      } else {
+        setErr('Could not submit. Try again?');
+      }
+      return;
+    }
+    onAdded();
+    onClose();
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center scrim-anim"
+      style={{ background: 'rgba(0,0,0,0.78)', backdropFilter: 'blur(4px)' }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div className="sheet-anim bg-[var(--bg-elev)] border-t sm:border border-[var(--line)] rounded-t-2xl sm:rounded-2xl w-full sm:max-w-md p-5 safe-bottom max-h-[92vh] overflow-y-auto">
+        <div className="flex items-start justify-between mb-4">
+          <h3 className="font-display text-2xl text-[var(--hop)] glow-pulse leading-none">
+            Suggest an album
+          </h3>
+          <button onClick={onClose} aria-label="Close" className="w-8 h-8 flex items-center justify-center rounded-full text-[var(--text-dim)] hover:text-[var(--text)]">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 6l12 12M6 18L18 6" />
+            </svg>
+          </button>
+        </div>
+
+        <div className="space-y-3">
+          <label className="block">
+            <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-faint)]">Artist *</span>
+            <input
+              value={artist}
+              onChange={(e) => setArtist(e.target.value)}
+              placeholder="e.g. Tame Impala"
+              className="mt-1 w-full bg-[var(--bg)] border border-[var(--line)] rounded-md px-3 py-2 text-[var(--text)] placeholder:text-[var(--text-faint)] focus:outline-none focus:border-[var(--hop)] focus:ring-1 focus:ring-[var(--hop)]"
+            />
+          </label>
+          <label className="block">
+            <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-faint)]">Album *</span>
+            <input
+              value={album}
+              onChange={(e) => setAlbum(e.target.value)}
+              placeholder="e.g. Currents"
+              className="mt-1 w-full bg-[var(--bg)] border border-[var(--line)] rounded-md px-3 py-2 text-[var(--text)] placeholder:text-[var(--text-faint)] focus:outline-none focus:border-[var(--hop)] focus:ring-1 focus:ring-[var(--hop)]"
+            />
+          </label>
+          <label className="block">
+            <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-faint)]">Email *</span>
+            <input
+              type="email"
+              inputMode="email"
+              autoComplete="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="you@example.com"
+              className="mt-1 w-full bg-[var(--bg)] border border-[var(--line)] rounded-md px-3 py-2 text-[var(--text)] placeholder:text-[var(--text-faint)] focus:outline-none focus:border-[var(--hop)] focus:ring-1 focus:ring-[var(--hop)]"
+            />
+          </label>
+          <label className="block">
+            <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-faint)]">Your name (optional)</span>
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Brian"
+              className="mt-1 w-full bg-[var(--bg)] border border-[var(--line)] rounded-md px-3 py-2 text-[var(--text)] placeholder:text-[var(--text-faint)] focus:outline-none focus:border-[var(--hop)] focus:ring-1 focus:ring-[var(--hop)]"
+            />
+          </label>
+          <label className="block">
+            <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-faint)]">Why? (optional)</span>
+            <textarea
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="Best record of the decade. Trust me."
+              rows={2}
+              maxLength={200}
+              className="mt-1 w-full bg-[var(--bg)] border border-[var(--line)] rounded-md px-3 py-2 text-[var(--text)] placeholder:text-[var(--text-faint)] focus:outline-none focus:border-[var(--hop)] focus:ring-1 focus:ring-[var(--hop)] resize-none"
+            />
+          </label>
+        </div>
+
+        {/* Opt-in checkboxes */}
+        <div className="mt-4 space-y-2 pt-3 border-t border-[var(--line)]">
+          <label className="flex items-start gap-2.5 cursor-pointer group">
+            <input
+              type="checkbox"
+              checked={notifyOnAcquired}
+              onChange={(e) => setNotifyOnAcquired(e.target.checked)}
+              className="mt-0.5 w-4 h-4 accent-[var(--hop)] cursor-pointer"
+            />
+            <span className="text-[13px] text-[var(--text-dim)] group-hover:text-[var(--text)] leading-snug">
+              <strong className="text-[var(--text)]">Email me</strong> if Inner Groove adds this record to the collection.
+            </span>
+          </label>
+          <label className="flex items-start gap-2.5 cursor-pointer group">
+            <input
+              type="checkbox"
+              checked={subscribeNewsletter}
+              onChange={(e) => setSubscribeNewsletter(e.target.checked)}
+              className="mt-0.5 w-4 h-4 accent-[var(--hop)] cursor-pointer"
+            />
+            <span className="text-[13px] text-[var(--text-dim)] group-hover:text-[var(--text)] leading-snug">
+              Sign me up for the <strong className="text-[var(--text)]">Inner Groove newsletter</strong> — beer drops, vinyl events, the occasional show.
+            </span>
+          </label>
+        </div>
+
+        {err && (
+          <div className="mt-3 text-sm text-red-400">{err}</div>
+        )}
+
+        <button
+          onClick={submit}
+          disabled={submitting}
+          className="mt-5 w-full py-3 rounded-lg bg-[var(--hop)] text-[#0a1a02] font-display text-xl tracking-wider hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition"
+        >
+          {submitting ? 'Submitting…' : 'Submit'}
+        </button>
+
+        <p className="mt-3 text-[10px] text-[var(--text-faint)] leading-relaxed">
+          We'll only email you about what you opt into above. We don't share your email.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// ADMIN APP — staff-only, lives at /admin
+// ============================================================================
+
+/** Simple session-based gate. PIN check stored in sessionStorage so each new
+ *  tab/closed-browser requires re-auth, but a refresh doesn't kick you out. */
+function PinGate({ onUnlock }) {
+  const [pin, setPin] = useState('');
+  const [err, setErr] = useState('');
+  const [shake, setShake] = useState(false);
+
+  const submit = (e) => {
+    e?.preventDefault?.();
+    if (pin === ADMIN_PIN) {
+      try { sessionStorage.setItem('igb_vinyl_admin_unlocked', '1'); } catch {}
+      onUnlock();
+    } else {
+      setErr('Wrong PIN');
+      setShake(true);
+      setTimeout(() => setShake(false), 400);
+      setPin('');
+    }
+  };
+
+  return (
+    <div className="min-h-screen flex items-center justify-center px-6">
+      <form onSubmit={submit} className={`w-full max-w-xs ${shake ? 'vote-bump' : ''}`}>
+        <div className="text-center mb-6">
+          <div className="font-mono text-[10px] tracking-[0.25em] text-[var(--text-faint)] uppercase mb-1">
+            Inner Groove · Staff Only
+          </div>
+          <h1 className="font-display text-4xl glow-pulse leading-none">Vinyl Admin</h1>
+        </div>
+        <input
+          type="password"
+          inputMode="numeric"
+          autoFocus
+          value={pin}
+          onChange={(e) => { setPin(e.target.value); setErr(''); }}
+          placeholder="PIN"
+          className="w-full text-center font-mono text-2xl bg-[var(--bg-elev)] border border-[var(--line)] rounded-lg px-4 py-3 text-[var(--text)] placeholder:text-[var(--text-faint)] focus:outline-none focus:border-[var(--hop)] focus:ring-1 focus:ring-[var(--hop)] tracking-[0.5em]"
+        />
+        {err && <div className="text-center text-sm text-red-400 mt-2">{err}</div>}
+        <button
+          type="submit"
+          className="mt-4 w-full py-3 rounded-lg bg-[var(--hop)] text-[#0a1a02] font-display text-xl tracking-wider hover:brightness-110 transition shadow-[0_0_24px_var(--hop-glow)]"
+        >
+          Unlock
+        </button>
+        <a href="/" className="block text-center text-xs text-[var(--text-faint)] hover:text-[var(--text-dim)] mt-4 underline">
+          Back to patron view
+        </a>
+      </form>
+    </div>
+  );
+}
+
+function AdminHeader({ view, setView }) {
+  return (
+    <header className="sticky top-0 z-40 bg-[var(--bg)]/85 backdrop-blur-md border-b border-[var(--line)]">
+      <div className="max-w-3xl mx-auto px-4 pt-3 pb-0">
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <div className="font-mono text-[10px] tracking-[0.25em] text-[var(--text-faint)] uppercase">
+              IGB · Vinyl Admin
+            </div>
+            <h1 className="font-display text-3xl glow-pulse leading-none">Stack Manager</h1>
+          </div>
+          <button
+            onClick={() => {
+              try { sessionStorage.removeItem('igb_vinyl_admin_unlocked'); } catch {}
+              window.location.reload();
+            }}
+            className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-faint)] hover:text-[var(--text-dim)]"
+          >
+            Lock
+          </button>
+        </div>
+        <nav className="flex gap-5 -mb-px overflow-x-auto">
+          {[
+            ['scan',     'Scan'],
+            ['manual',   'Add manually'],
+            ['inventory','Manage'],
+            ['wishlist', 'Wishlist'],
+            ['slides',   'Slides'],
+          ].map(([k, label]) => (
+            <button
+              key={k}
+              onClick={() => setView(k)}
+              className={`font-display text-lg pb-2 px-1 transition-colors whitespace-nowrap ${
+                view === k ? 'tab-active' : 'text-[var(--text-dim)] hover:text-[var(--text)]'
+              }`}>
+              {label}
+            </button>
+          ))}
+        </nav>
+      </div>
+    </header>
+  );
+}
+
+// ----------------------------------------------------------------------------
+// SCAN VIEW — phone camera + barcode detection + Discogs lookup + save
+// ----------------------------------------------------------------------------
+function ScanView() {
+  const videoRef     = useRef(null);
+  const streamRef    = useRef(null);
+  const detectorRef  = useRef(null);
+  const scanningRef  = useRef(false);
+  const lastScanRef  = useRef(0);
+
+  const [supported,   setSupported]   = useState(true);
+  const [scanning,    setScanning]    = useState(false);
+  const [lookingUp,   setLookingUp]   = useState(false);
+  const [preview,     setPreview]     = useState(null);  // { record, alternates, barcode }
+  const [error,       setError]       = useState('');
+  const [manualBarcode, setManualBarcode] = useState('');
+  const [savedFlash,  setSavedFlash]  = useState(null);
+
+  // Check BarcodeDetector support up front
+  useEffect(() => {
+    if (typeof window.BarcodeDetector === 'undefined') {
+      setSupported(false);
+    }
+  }, []);
+
+  const stopCamera = useCallback(() => {
+    scanningRef.current = false;
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+    setScanning(false);
+  }, []);
+
+  const startCamera = useCallback(async () => {
+    setError('');
+    setPreview(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' } },
+        audio: false,
+      });
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
+      }
+      setScanning(true);
+
+      // Initialize detector — UPC-A and EAN-13 are the vinyl-relevant formats
+      detectorRef.current = new window.BarcodeDetector({
+        formats: ['upc_a', 'ean_13', 'ean_8', 'upc_e', 'code_128'],
+      });
+      scanningRef.current = true;
+      scanLoop();
+    } catch (err) {
+      setError(`Camera error: ${err.message || err}. Try manual entry.`);
+      setScanning(false);
+    }
+  }, []);
+
+  const scanLoop = async () => {
+    if (!scanningRef.current || !videoRef.current || !detectorRef.current) return;
+    try {
+      const codes = await detectorRef.current.detect(videoRef.current);
+      if (codes.length > 0) {
+        const now = Date.now();
+        // Debounce: ignore if we just scanned the same code
+        if (now - lastScanRef.current > 1500) {
+          lastScanRef.current = now;
+          const value = codes[0].rawValue;
+          if (navigator.vibrate) navigator.vibrate(100);
+          await handleBarcode(value);
+        }
+      }
+    } catch {
+      // Detection errors are normal mid-frame; just continue
+    }
+    if (scanningRef.current) {
+      requestAnimationFrame(scanLoop);
+    }
+  };
+
+  const handleBarcode = async (barcode) => {
+    setLookingUp(true);
+    setError('');
+    try {
+      const res = await fetch(
+        `${DISCOGS_LOOKUP_URL}?barcode=${encodeURIComponent(barcode)}`,
+        { headers: { 'Authorization': `Bearer ${SUPABASE_ANON}`, 'apikey': SUPABASE_ANON } },
+      );
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      if (!data.found) {
+        setError(`No Discogs match for barcode ${barcode}. Try manual entry.`);
+        setLookingUp(false);
+        return;
+      }
+      setPreview({ ...data, barcode });
+    } catch (err) {
+      setError(`Lookup failed: ${err.message}`);
+    } finally {
+      setLookingUp(false);
+    }
+  };
+
+  const handleManualBarcode = (e) => {
+    e?.preventDefault?.();
+    if (manualBarcode.trim()) handleBarcode(manualBarcode.trim());
+  };
+
+  const saveRecord = async () => {
+    if (!preview) return;
+    const r = preview.record;
+    const { error: e } = await supabase.from('vinyl_inventory').insert({
+      artist:           r.artist,
+      album:            r.album,
+      discogs_id:       r.discogs_id,
+      discogs_url:      r.discogs_url,
+      cover_url:        r.cover_url,
+      year:             r.year,
+      genres:           r.genres,
+      styles:           r.styles,
+      tracklist:        r.tracklist,
+      sides:            r.sides,
+      barcode:          preview.barcode || null,
+      match_confidence: 'confirmed',
+      created_by:       'admin-scan',
+    });
+    if (e) {
+      // Unique constraint hit on discogs_id = already in collection
+      if (e.code === '23505') {
+        setError(`That record (Discogs ID ${r.discogs_id}) is already in the collection.`);
+      } else {
+        setError(`Save failed: ${e.message}`);
+      }
+      return;
+    }
+    setSavedFlash(r.album);
+    setTimeout(() => setSavedFlash(null), 2200);
+    setPreview(null);
+    // Camera is still running — they can scan the next one immediately
+  };
+
+  const rejectAndRescan = () => {
+    setPreview(null);
+    setError('');
+  };
+
+  // Cleanup on unmount
+  useEffect(() => () => stopCamera(), [stopCamera]);
+
+  return (
+    <div className="max-w-2xl mx-auto px-4 py-4">
+      {savedFlash && (
+        <div className="mb-3 p-3 rounded-lg border border-[var(--hop-deep)] bg-[#6dc13520] text-[var(--hop)] font-mono text-sm">
+          ✓ Saved: {savedFlash}
+        </div>
+      )}
+
+      {!supported && (
+        <div className="mb-4 p-3 rounded-lg border border-[var(--warn)] bg-[#fbbf2410] text-[var(--warn)] text-sm">
+          Your browser doesn't support live barcode scanning. Use Chrome on Android, or
+          enter the barcode manually below. (Safari on iOS supports scanning starting in iOS 17.)
+        </div>
+      )}
+
+      {/* Camera area */}
+      <div className="relative aspect-[3/4] sm:aspect-video bg-black rounded-lg overflow-hidden border border-[var(--line)]">
+        <video
+          ref={videoRef}
+          playsInline
+          muted
+          className={`w-full h-full object-cover ${scanning ? '' : 'opacity-0'}`}
+        />
+        {!scanning && !preview && (
+          <div className="absolute inset-0 flex items-center justify-center flex-col gap-3 text-center px-6">
+            <VinylSpinner size={64} />
+            <div className="font-display text-2xl text-[var(--text-dim)]">Camera off</div>
+            <div className="text-xs text-[var(--text-faint)] max-w-xs">
+              Point the camera at the barcode on the back of the record sleeve.
+            </div>
+          </div>
+        )}
+        {/* Scan reticle overlay */}
+        {scanning && !lookingUp && !preview && (
+          <>
+            <div className="absolute inset-0 pointer-events-none">
+              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-3/4 h-1/3 border-2 border-[var(--hop)] rounded-md shadow-[0_0_24px_var(--hop-glow)]" />
+            </div>
+            <div className="absolute bottom-3 left-0 right-0 text-center font-mono text-[11px] uppercase tracking-wider text-[var(--hop)]">
+              ◉ Looking for a barcode…
+            </div>
+          </>
+        )}
+        {lookingUp && (
+          <div className="absolute inset-0 flex items-center justify-center flex-col gap-3 bg-black/80">
+            <VinylSpinner size={56} />
+            <div className="font-display text-xl text-[var(--hop)]">Looking up…</div>
+          </div>
+        )}
+      </div>
+
+      {/* Camera controls */}
+      <div className="mt-3 flex gap-2">
+        {!scanning ? (
+          <button
+            onClick={startCamera}
+            disabled={!supported}
+            className="flex-1 py-3 rounded-lg bg-[var(--hop)] text-[#0a1a02] font-display text-xl tracking-wider hover:brightness-110 disabled:opacity-40 disabled:cursor-not-allowed transition shadow-[0_0_24px_var(--hop-glow)]"
+          >
+            Start camera
+          </button>
+        ) : (
+          <button
+            onClick={stopCamera}
+            className="flex-1 py-3 rounded-lg border border-[var(--line)] text-[var(--text-dim)] font-display text-xl tracking-wider hover:border-[var(--text-faint)] transition"
+          >
+            Stop camera
+          </button>
+        )}
+      </div>
+
+      {error && (
+        <div className="mt-3 p-3 rounded-lg border border-red-700 bg-red-900/20 text-red-300 text-sm">
+          {error}
+        </div>
+      )}
+
+      {/* Manual barcode entry — works even without camera support */}
+      <form onSubmit={handleManualBarcode} className="mt-4 flex gap-2">
+        <input
+          value={manualBarcode}
+          onChange={(e) => setManualBarcode(e.target.value)}
+          placeholder="Or type barcode manually"
+          inputMode="numeric"
+          className="flex-1 bg-[var(--bg-elev)] border border-[var(--line)] rounded-lg px-3 py-2 text-[var(--text)] placeholder:text-[var(--text-faint)] focus:outline-none focus:border-[var(--hop)]"
+        />
+        <button
+          type="submit"
+          disabled={!manualBarcode.trim() || lookingUp}
+          className="px-4 py-2 rounded-lg border border-[var(--hop)] text-[var(--hop)] font-display text-lg disabled:opacity-40 hover:bg-[#6dc13520] transition"
+        >
+          Look up
+        </button>
+      </form>
+
+      {/* Preview / confirm */}
+      {preview && (
+        <ScanPreview
+          preview={preview}
+          onSave={saveRecord}
+          onReject={rejectAndRescan}
+        />
+      )}
+    </div>
+  );
+}
+
+function ScanPreview({ preview, onSave, onReject }) {
+  const r = preview.record;
+  return (
+    <div className="mt-4 p-4 rounded-lg border border-[var(--hop)] bg-[var(--bg-elev)] shadow-[0_0_32px_var(--hop-glow)] sheet-anim">
+      <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--hop)] mb-2">
+        ◉ Match found · barcode {preview.barcode}
+      </div>
+      <div className="flex gap-3">
+        <div className="w-24 sm:w-32 flex-shrink-0">
+          <div className="cover-frame rounded border border-[var(--line)]">
+            <CoverImage src={r.cover_url} alt={`${r.artist} - ${r.album}`} />
+          </div>
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-faint)]">
+            {r.year || '—'}{r.year && r.genres?.length ? ' · ' : ''}{(r.genres || []).slice(0, 2).join(' · ')}
+          </div>
+          <div className="font-display text-2xl text-[var(--text)] leading-none mt-1">
+            {clean(r.album)}
+          </div>
+          <div className="text-[var(--text-dim)] mt-0.5">{clean(r.artist)}</div>
+          <div className="font-mono text-[10px] text-[var(--text-faint)] mt-2">
+            {r.tracklist?.length || 0} tracks · {r.sides?.length || 0} sides ({(r.sides || []).join('/')})
+          </div>
+          {r.discogs_url && (
+            <a href={r.discogs_url} target="_blank" rel="noopener noreferrer"
+               className="text-[11px] font-mono text-[var(--text-dim)] hover:text-[var(--hop)] underline">
+              View on Discogs ↗
+            </a>
+          )}
+        </div>
+      </div>
+      <div className="flex gap-2 mt-4">
+        <button
+          onClick={onReject}
+          className="flex-1 py-2.5 rounded-lg border border-[var(--line)] text-[var(--text-dim)] font-display text-lg tracking-wider hover:border-red-600 hover:text-red-400 transition"
+        >
+          Wrong record
+        </button>
+        <button
+          onClick={onSave}
+          className="flex-1 py-2.5 rounded-lg bg-[var(--hop)] text-[#0a1a02] font-display text-lg tracking-wider hover:brightness-110 transition"
+        >
+          Save to inventory
+        </button>
+      </div>
+      {preview.alternates?.length > 0 && (
+        <details className="mt-3 text-[12px]">
+          <summary className="cursor-pointer text-[var(--text-faint)] hover:text-[var(--text-dim)]">
+            {preview.alternates.length} other matches
+          </summary>
+          <ul className="mt-2 space-y-1">
+            {preview.alternates.map((a) => (
+              <li key={a.discogs_id} className="text-[var(--text-faint)]">
+                · {a.title} {a.year && `(${a.year})`} {a.country && `· ${a.country}`}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+    </div>
+  );
+}
+
+// ----------------------------------------------------------------------------
+// MANUAL VIEW — for older records without barcodes, or barcode misses
+// ----------------------------------------------------------------------------
+function ManualView() {
+  const [artist, setArtist] = useState('');
+  const [album,  setAlbum]  = useState('');
+  const [lookingUp, setLookingUp] = useState(false);
+  const [preview, setPreview] = useState(null);
+  const [error, setError] = useState('');
+  const [saved, setSaved] = useState(null);
+
+  const lookup = async (e) => {
+    e?.preventDefault?.();
+    if (!artist.trim() || !album.trim()) {
+      setError('Both artist and album required.');
+      return;
+    }
+    setLookingUp(true);
+    setError('');
+    try {
+      const params = new URLSearchParams({ artist: artist.trim(), album: album.trim() });
+      const res = await fetch(`${DISCOGS_LOOKUP_URL}?${params}`, {
+        headers: { 'Authorization': `Bearer ${SUPABASE_ANON}`, 'apikey': SUPABASE_ANON },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      if (!data.found) {
+        // Offer to save with no enrichment
+        setPreview({ record: { artist: artist.trim(), album: album.trim() }, found: false });
+      } else {
+        setPreview({ ...data, found: true });
+      }
+    } catch (err) {
+      setError(`Lookup failed: ${err.message}`);
+    } finally {
+      setLookingUp(false);
+    }
+  };
+
+  const save = async () => {
+    if (!preview) return;
+    const r = preview.record;
+    const { error: e } = await supabase.from('vinyl_inventory').insert({
+      artist:           r.artist,
+      album:            r.album,
+      discogs_id:       r.discogs_id ?? null,
+      discogs_url:      r.discogs_url ?? null,
+      cover_url:        r.cover_url ?? null,
+      year:             r.year ?? null,
+      genres:           r.genres ?? [],
+      styles:           r.styles ?? [],
+      tracklist:        r.tracklist ?? null,
+      sides:            r.sides ?? [],
+      match_confidence: preview.found ? 'confirmed' : 'unmatched',
+      created_by:       'admin-manual',
+    });
+    if (e) {
+      if (e.code === '23505') {
+        setError(`That Discogs ID is already in the collection.`);
+      } else {
+        setError(`Save failed: ${e.message}`);
+      }
+      return;
+    }
+    setSaved(r.album);
+    setTimeout(() => setSaved(null), 2200);
+    setArtist(''); setAlbum(''); setPreview(null);
+  };
+
+  return (
+    <div className="max-w-xl mx-auto px-4 py-4">
+      {saved && (
+        <div className="mb-3 p-3 rounded-lg border border-[var(--hop-deep)] bg-[#6dc13520] text-[var(--hop)] font-mono text-sm">
+          ✓ Saved: {saved}
+        </div>
+      )}
+
+      <form onSubmit={lookup} className="space-y-3">
+        <label className="block">
+          <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-faint)]">Artist</span>
+          <input
+            value={artist} onChange={(e) => setArtist(e.target.value)}
+            placeholder="e.g. Pink Floyd"
+            className="mt-1 w-full bg-[var(--bg-elev)] border border-[var(--line)] rounded-md px-3 py-2 text-[var(--text)] placeholder:text-[var(--text-faint)] focus:outline-none focus:border-[var(--hop)]"
+          />
+        </label>
+        <label className="block">
+          <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-faint)]">Album</span>
+          <input
+            value={album} onChange={(e) => setAlbum(e.target.value)}
+            placeholder="e.g. The Dark Side of the Moon"
+            className="mt-1 w-full bg-[var(--bg-elev)] border border-[var(--line)] rounded-md px-3 py-2 text-[var(--text)] placeholder:text-[var(--text-faint)] focus:outline-none focus:border-[var(--hop)]"
+          />
+        </label>
+        <button
+          type="submit" disabled={lookingUp}
+          className="w-full py-3 rounded-lg bg-[var(--hop)] text-[#0a1a02] font-display text-xl tracking-wider hover:brightness-110 disabled:opacity-50 transition"
+        >
+          {lookingUp ? 'Looking up…' : 'Look up on Discogs'}
+        </button>
+      </form>
+
+      {error && (
+        <div className="mt-3 p-3 rounded-lg border border-red-700 bg-red-900/20 text-red-300 text-sm">
+          {error}
+        </div>
+      )}
+
+      {preview && preview.found && (
+        <ScanPreview preview={preview} onSave={save} onReject={() => setPreview(null)} />
+      )}
+
+      {preview && !preview.found && (
+        <div className="mt-4 p-4 rounded-lg border border-[var(--warn)] bg-[#fbbf2410] sheet-anim">
+          <div className="font-mono text-[10px] uppercase tracking-wider text-[var(--warn)] mb-2">
+            ◉ No Discogs match
+          </div>
+          <p className="text-sm text-[var(--text-dim)]">
+            Couldn't find <strong className="text-[var(--text)]">{preview.record.artist} — {preview.record.album}</strong> on Discogs.
+            Save it anyway with just the artist and album name? (No cover art or tracklist will appear in the patron view.)
+          </p>
+          <div className="flex gap-2 mt-3">
+            <button onClick={() => setPreview(null)}
+              className="flex-1 py-2 rounded-lg border border-[var(--line)] text-[var(--text-dim)] font-display tracking-wider hover:border-[var(--text-faint)]">
+              Cancel
+            </button>
+            <button onClick={save}
+              className="flex-1 py-2 rounded-lg bg-[var(--warn)] text-[#1a1303] font-display tracking-wider hover:brightness-110">
+              Save anyway
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ----------------------------------------------------------------------------
+// INVENTORY VIEW — list, filter, edit status, delete
+// ----------------------------------------------------------------------------
+function InventoryView() {
+  const [items, setItems]     = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [query, setQuery]     = useState('');
+  const [editing, setEditing] = useState(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const { data, error } = await supabase
+      .from('vinyl_inventory')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (error) console.error(error);
+    setItems(data || []);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const filtered = useMemo(() => {
+    if (!query.trim()) return items;
+    const q = query.toLowerCase();
+    return items.filter((r) =>
+      r.artist?.toLowerCase().includes(q) || r.album?.toLowerCase().includes(q)
+    );
+  }, [items, query]);
+
+  return (
+    <div className="max-w-3xl mx-auto px-4 py-4">
+      <div className="relative mb-3">
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search inventory…"
+          className="w-full bg-[var(--bg-elev)] border border-[var(--line)] rounded-lg px-4 py-2 text-[var(--text)] placeholder:text-[var(--text-faint)] focus:outline-none focus:border-[var(--hop)]"
+        />
+      </div>
+      <div className="font-mono text-[11px] uppercase tracking-wider text-[var(--text-faint)] mb-3">
+        {loading ? 'Loading…' : `${filtered.length} of ${items.length} records`}
+      </div>
+
+      {loading ? (
+        <div className="flex items-center justify-center py-12"><VinylSpinner /></div>
+      ) : (
+        <ul className="space-y-1.5">
+          {filtered.map((r) => (
+            <li key={r.id}
+              className="flex items-center gap-3 p-2 rounded border border-[var(--line)] bg-[var(--bg-elev)] hover:border-[var(--text-faint)] transition">
+              <div className="w-12 h-12 flex-shrink-0 rounded overflow-hidden bg-[var(--bg-card)]">
+                <CoverImage src={r.cover_url} alt={r.album} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-semibold text-[var(--text)] truncate">{clean(r.album)}</div>
+                <div className="text-xs text-[var(--text-dim)] truncate">{clean(r.artist)}{r.year ? ` · ${r.year}` : ''}</div>
+              </div>
+              {r.status && r.status !== 'available' && (
+                <StatusPill status={r.status} />
+              )}
+              <button
+                onClick={() => setEditing(r)}
+                className="font-mono text-[10px] uppercase tracking-wider px-2 py-1 rounded text-[var(--text-dim)] hover:text-[var(--hop)] hover:bg-[#6dc13510]"
+              >
+                Edit
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {editing && <EditRecord record={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} />}
+    </div>
+  );
+}
+
+function EditRecord({ record, onClose, onSaved }) {
+  const [status, setStatus] = useState(record.status || 'available');
+  const [notes,  setNotes]  = useState(record.notes || '');
+  const [saving, setSaving] = useState(false);
+  const [error,  setError]  = useState('');
+
+  const save = async () => {
+    setSaving(true);
+    setError('');
+    const { error: e } = await supabase
+      .from('vinyl_inventory')
+      .update({ status, notes: notes.trim() || null })
+      .eq('id', record.id);
+    setSaving(false);
+    if (e) { setError(e.message); return; }
+    onSaved();
+  };
+
+  const remove = async () => {
+    if (!confirm(`Remove "${record.album}" by ${record.artist} from the collection?`)) return;
+    setSaving(true);
+    const { error: e } = await supabase.from('vinyl_inventory').delete().eq('id', record.id);
+    setSaving(false);
+    if (e) { setError(e.message); return; }
+    onSaved();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center scrim-anim"
+      style={{ background: 'rgba(0,0,0,0.78)', backdropFilter: 'blur(4px)' }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="sheet-anim bg-[var(--bg-elev)] border-t sm:border border-[var(--line)] rounded-t-2xl sm:rounded-2xl w-full sm:max-w-md p-5 safe-bottom">
+        <div className="flex items-start gap-3 mb-4">
+          <div className="w-16 h-16 flex-shrink-0 rounded overflow-hidden">
+            <CoverImage src={record.cover_url} alt={record.album} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="font-display text-xl text-[var(--text)] leading-none">{clean(record.album)}</div>
+            <div className="text-sm text-[var(--text-dim)] mt-1">{clean(record.artist)}</div>
+          </div>
+          <button onClick={onClose} className="text-[var(--text-dim)] hover:text-[var(--text)] text-2xl leading-none">×</button>
+        </div>
+
+        <label className="block mb-3">
+          <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-faint)]">Status</span>
+          <select value={status} onChange={(e) => setStatus(e.target.value)}
+            className="mt-1 w-full bg-[var(--bg)] border border-[var(--line)] rounded-md px-3 py-2 text-[var(--text)] focus:outline-none focus:border-[var(--hop)]">
+            <option value="available">Available</option>
+            <option value="playing">On the deck</option>
+            <option value="featured">★ Featured</option>
+            <option value="damaged">Damaged</option>
+            <option value="missing">Missing</option>
+          </select>
+        </label>
+
+        <label className="block mb-4">
+          <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-faint)]">Staff notes</span>
+          <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2}
+            placeholder="Bin location, condition, etc."
+            className="mt-1 w-full bg-[var(--bg)] border border-[var(--line)] rounded-md px-3 py-2 text-[var(--text)] placeholder:text-[var(--text-faint)] focus:outline-none focus:border-[var(--hop)] resize-none" />
+        </label>
+
+        {error && <div className="text-sm text-red-400 mb-3">{error}</div>}
+
+        <div className="flex gap-2">
+          <button onClick={remove} disabled={saving}
+            className="px-3 py-2 rounded-lg border border-red-800 text-red-400 font-mono text-[11px] uppercase tracking-wider hover:bg-red-900/20 disabled:opacity-50">
+            Delete
+          </button>
+          <button onClick={onClose} className="flex-1 py-2 rounded-lg border border-[var(--line)] text-[var(--text-dim)] font-display tracking-wider">
+            Cancel
+          </button>
+          <button onClick={save} disabled={saving}
+            className="flex-1 py-2 rounded-lg bg-[var(--hop)] text-[#0a1a02] font-display tracking-wider hover:brightness-110 disabled:opacity-50">
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ----------------------------------------------------------------------------
+// WISHLIST ADMIN VIEW — promote to "ordered", mark "acquired", or decline
+// ----------------------------------------------------------------------------
+function WishlistAdminView() {
+  const [items, setItems]     = useState([]);
+  const [subscribers, setSubscribers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [view, setView]       = useState('requests'); // 'requests' | 'subscribers'
+  const [copyFlash, setCopyFlash] = useState(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const [{ data: w, error: e1 }, { data: s, error: e2 }] = await Promise.all([
+      supabase.from('vinyl_wishlist').select('*').order('vote_count', { ascending: false }),
+      supabase.from('email_subscribers').select('*').order('subscribed_at', { ascending: false }),
+    ]);
+    if (e1) console.error(e1);
+    if (e2) console.error(e2);
+    setItems(w || []);
+    setSubscribers(s || []);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const setStatus = async (item, status) => {
+    const { error } = await supabase.from('vinyl_wishlist').update({ status }).eq('id', item.id);
+    if (error) { alert(error.message); return; }
+    load();
+  };
+
+  const markNotified = async (item) => {
+    const { error } = await supabase.from('vinyl_wishlist').update({ notified_at: new Date().toISOString() }).eq('id', item.id);
+    if (error) { alert(error.message); return; }
+    load();
+  };
+
+  const unsubscribe = async (sub) => {
+    if (!confirm(`Unsubscribe ${sub.email}?`)) return;
+    const { error } = await supabase
+      .from('email_subscribers')
+      .update({ unsubscribed_at: new Date().toISOString() })
+      .eq('email', sub.email);
+    if (error) { alert(error.message); return; }
+    load();
+  };
+
+  const copyToClipboard = async (text, label) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopyFlash(label);
+      setTimeout(() => setCopyFlash(null), 1800);
+    } catch {
+      // Fallback: select + execCommand for older browsers
+      alert(`Copy this:\n\n${text}`);
+    }
+  };
+
+  // Aggregate "people to notify when a given record arrives" across all
+  // wishlist requests for the same artist+album (in case multiple patrons
+  // requested the same record separately).
+  const notifyEmailsFor = (item) => {
+    const key = `${item.artist}|${item.album}`.toLowerCase();
+    return [...new Set(
+      items
+        .filter((r) => `${r.artist}|${r.album}`.toLowerCase() === key)
+        .filter((r) => r.notify_on_acquired && r.submitter_email)
+        .map((r) => r.submitter_email)
+    )];
+  };
+
+  const allActiveSubscribers = subscribers.filter((s) => !s.unsubscribed_at);
+
+  return (
+    <div className="max-w-3xl mx-auto px-4 py-4">
+      {copyFlash && (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-lg bg-[var(--hop)] text-[#0a1a02] font-mono text-sm shadow-[0_0_24px_var(--hop-glow)] sheet-anim">
+          ✓ Copied {copyFlash}
+        </div>
+      )}
+
+      {/* Sub-tabs */}
+      <div className="flex items-center gap-2 mb-4 border-b border-[var(--line)] -mx-4 px-4">
+        <button
+          onClick={() => setView('requests')}
+          className={`font-display text-base pb-2 px-1 transition-colors ${
+            view === 'requests' ? 'tab-active' : 'text-[var(--text-dim)] hover:text-[var(--text)]'
+          }`}>
+          Requests <span className="text-[var(--text-faint)] text-xs">({items.length})</span>
+        </button>
+        <button
+          onClick={() => setView('subscribers')}
+          className={`font-display text-base pb-2 px-1 transition-colors ${
+            view === 'subscribers' ? 'tab-active' : 'text-[var(--text-dim)] hover:text-[var(--text)]'
+          }`}>
+          Newsletter <span className="text-[var(--text-faint)] text-xs">({allActiveSubscribers.length})</span>
+        </button>
+      </div>
+
+      {loading ? (
+        <div className="flex items-center justify-center py-12"><VinylSpinner /></div>
+      ) : view === 'requests' ? (
+        items.length === 0 ? (
+          <div className="text-center text-[var(--text-faint)] py-12">No wishlist items yet.</div>
+        ) : (
+          <>
+            <div className="mb-3 flex items-center gap-2 flex-wrap">
+              <button
+                onClick={() => {
+                  const csv = buildCsv(items, [
+                    ['artist',               'artist'],
+                    ['album',                'album'],
+                    ['vote_count',           'votes'],
+                    ['status',               'status'],
+                    ['submitter_email',      'email'],
+                    ['submitted_by',         'submitted_by'],
+                    ['note',                 'note'],
+                    ['notify_on_acquired',   'notify_on_acquired'],
+                    ['subscribe_newsletter', 'subscribe_newsletter'],
+                    ['notified_at',          'notified_at'],
+                    ['created_at',           'created_at'],
+                  ]);
+                  downloadFile(`igb-wishlist-${ymd()}.csv`, csv);
+                }}
+                className="text-[11px] font-mono uppercase tracking-wider px-3 py-1.5 rounded border border-[var(--hop)] text-[var(--hop)] hover:bg-[#6dc13510]">
+                ↓ Export wishlist CSV ({items.length})
+              </button>
+              <span className="text-[11px] font-mono text-[var(--text-faint)]">
+                · everything below as a spreadsheet
+              </span>
+            </div>
+            <ul className="space-y-2">
+              {items.map((it) => {
+                const notifyEmails = notifyEmailsFor(it);
+                return (
+                  <li key={it.id} className="p-3 rounded-lg border border-[var(--line)] bg-[var(--bg-elev)]">
+                    <div className="flex items-start gap-3">
+                    <div className="font-display text-2xl text-[var(--hop)] leading-none w-10 text-center">{it.vote_count}</div>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-semibold text-[var(--text)]">{clean(it.album)}</div>
+                      <div className="text-sm text-[var(--text-dim)]">{clean(it.artist)}</div>
+                      {it.note && <div className="text-[11px] italic text-[var(--text-faint)] mt-1">"{it.note}"{it.submitted_by ? ` — ${it.submitted_by}` : ''}</div>}
+                      {/* Submitter contact info */}
+                      {(it.submitter_email || it.notify_on_acquired) && (
+                        <div className="mt-2 p-2 rounded bg-[var(--bg)] border border-[var(--line)] text-[11px] font-mono">
+                          {it.submitter_email && (
+                            <div className="flex items-center gap-2">
+                              <span className="text-[var(--text-faint)]">✉</span>
+                              <span className="text-[var(--text-dim)] truncate">{it.submitter_email}</span>
+                              <button
+                                onClick={() => copyToClipboard(it.submitter_email, 'email')}
+                                className="ml-auto text-[var(--text-faint)] hover:text-[var(--hop)]"
+                                aria-label="Copy email"
+                              >Copy</button>
+                            </div>
+                          )}
+                          <div className="flex gap-3 mt-1 text-[10px] uppercase tracking-wider">
+                            {it.notify_on_acquired && (
+                              <span className={it.notified_at ? 'text-[var(--text-faint)] line-through' : 'text-[var(--hop)]'}>
+                                ◉ wants notification
+                                {it.notified_at && ' · sent'}
+                              </span>
+                            )}
+                            {it.subscribe_newsletter && (
+                              <span className="text-[var(--hop)]">◉ newsletter</span>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                      <div className="font-mono text-[10px] uppercase tracking-wider mt-2">
+                        Status: <span className="text-[var(--text-dim)]">{it.status}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Notify-list shortcut: when status is acquired and there are emails to notify */}
+                  {it.status === 'acquired' && notifyEmails.length > 0 && !it.notified_at && (
+                    <div className="mt-3 p-2 rounded border border-[var(--hop-deep)] bg-[#6dc1350a]">
+                      <div className="text-[11px] font-mono text-[var(--hop)] mb-1.5">
+                        ✦ {notifyEmails.length} {notifyEmails.length === 1 ? 'person wants' : 'people want'} to know this arrived
+                      </div>
+                      <div className="flex gap-2 flex-wrap">
+                        <button
+                          onClick={() => copyToClipboard(notifyEmails.join(', '), `${notifyEmails.length} email${notifyEmails.length === 1 ? '' : 's'}`)}
+                          className="text-[10px] font-mono uppercase tracking-wider px-2 py-1 rounded bg-[var(--hop)] text-[#0a1a02]">
+                          Copy emails for bcc
+                        </button>
+                        <a
+                          href={`mailto:?bcc=${encodeURIComponent(notifyEmails.join(','))}&subject=${encodeURIComponent(`Inner Groove: "${it.album}" is in the collection!`)}&body=${encodeURIComponent(`Hey — you asked us to grab ${it.artist} - ${it.album} for the brewery. It's in! Come spin it next time you're in.\n\n— Inner Groove`)}`}
+                          className="text-[10px] font-mono uppercase tracking-wider px-2 py-1 rounded border border-[var(--hop)] text-[var(--hop)] hover:bg-[#6dc13510]">
+                          Open in mail
+                        </a>
+                        <button
+                          onClick={() => markNotified(it)}
+                          className="text-[10px] font-mono uppercase tracking-wider px-2 py-1 rounded border border-[var(--line)] text-[var(--text-dim)] hover:border-[var(--text-faint)]">
+                          Mark sent
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex gap-2 mt-3 flex-wrap">
+                    {it.status !== 'open' && (
+                      <button onClick={() => setStatus(it, 'open')}
+                        className="text-[10px] font-mono uppercase tracking-wider px-2 py-1 rounded border border-[var(--line)] text-[var(--text-dim)] hover:border-[var(--text-faint)]">
+                        Reopen
+                      </button>
+                    )}
+                    {it.status !== 'ordered' && (
+                      <button onClick={() => setStatus(it, 'ordered')}
+                        className="text-[10px] font-mono uppercase tracking-wider px-2 py-1 rounded border border-[var(--warn)] text-[var(--warn)] hover:bg-[#fbbf2410]">
+                        Mark ordered
+                      </button>
+                    )}
+                    {it.status !== 'acquired' && (
+                      <button onClick={() => setStatus(it, 'acquired')}
+                        className="text-[10px] font-mono uppercase tracking-wider px-2 py-1 rounded border border-[var(--hop)] text-[var(--hop)] hover:bg-[#6dc13510]">
+                        Mark acquired
+                      </button>
+                    )}
+                    {it.status !== 'declined' && (
+                      <button onClick={() => setStatus(it, 'declined')}
+                        className="text-[10px] font-mono uppercase tracking-wider px-2 py-1 rounded border border-red-800 text-red-400 hover:bg-red-900/10">
+                        Decline
+                      </button>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+            </ul>
+          </>
+        )
+      ) : (
+        // Newsletter subscribers view
+        <div>
+          {allActiveSubscribers.length === 0 ? (
+            <div className="text-center text-[var(--text-faint)] py-12">No newsletter subscribers yet.</div>
+          ) : (
+            <>
+              <div className="mb-3 flex items-center gap-2 flex-wrap">
+                <button
+                  onClick={() => copyToClipboard(
+                    allActiveSubscribers.map((s) => s.email).join(', '),
+                    `${allActiveSubscribers.length} email${allActiveSubscribers.length === 1 ? '' : 's'}`
+                  )}
+                  className="text-[11px] font-mono uppercase tracking-wider px-3 py-1.5 rounded bg-[var(--hop)] text-[#0a1a02]">
+                  Copy all {allActiveSubscribers.length} emails
+                </button>
+                <button
+                  onClick={() => {
+                    const csv = buildCsv(subscribers, [
+                      ['email',           'email'],
+                      ['source',          'source'],
+                      ['subscribed_at',   'subscribed_at'],
+                      ['unsubscribed_at', 'unsubscribed_at'],
+                      ['notes',           'notes'],
+                    ]);
+                    downloadFile(`igb-newsletter-${ymd()}.csv`, csv);
+                  }}
+                  className="text-[11px] font-mono uppercase tracking-wider px-3 py-1.5 rounded border border-[var(--hop)] text-[var(--hop)] hover:bg-[#6dc13510]">
+                  ↓ Export CSV ({subscribers.length})
+                </button>
+                <span className="text-[11px] font-mono text-[var(--text-faint)]">
+                  · paste into bcc, or import to Mailchimp
+                </span>
+              </div>
+              <ul className="space-y-1.5">
+                {subscribers.map((s) => (
+                  <li key={s.email}
+                    className={`flex items-center gap-2 p-2 rounded border ${
+                      s.unsubscribed_at ? 'border-[var(--line)] opacity-50' : 'border-[var(--line)] bg-[var(--bg-elev)]'
+                    }`}>
+                    <span className="font-mono text-sm text-[var(--text)] flex-1 truncate">{s.email}</span>
+                    <span className="font-mono text-[10px] text-[var(--text-faint)] uppercase tracking-wider">
+                      {s.unsubscribed_at ? 'unsub' : new Date(s.subscribed_at).toLocaleDateString()}
+                    </span>
+                    {!s.unsubscribed_at && (
+                      <button onClick={() => unsubscribe(s)}
+                        className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded text-[var(--text-faint)] hover:text-red-400">
+                        Unsub
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-4 text-[10px] text-[var(--text-faint)] leading-relaxed">
+                Subscribers come from the wishlist newsletter checkbox. Use the
+                "Copy all" button to grab the list and paste into bcc when sending
+                from your email client. (No automated sending from here yet.)
+              </p>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ----------------------------------------------------------------------------
+// SLIDES VIEW — manage the TV display slides + trigger Drive sync
+// ----------------------------------------------------------------------------
+function SlidesView() {
+  const [slides, setSlides] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
+  const [lastSync, setLastSync] = useState(null);
+  const [msg, setMsg] = useState('');
+
+  const loadSlides = useCallback(async () => {
+    const { data } = await supabase
+      .from('display_slides')
+      .select('*')
+      .order('sort_order', { ascending: true });
+    setSlides(data || []);
+    setLoading(false);
+  }, []);
+
+  const loadLastSync = useCallback(async () => {
+    const { data } = await supabase
+      .from('app_settings')
+      .select('value')
+      .eq('key', 'slides_last_sync')
+      .maybeSingle();
+    setLastSync(data?.value || null);
+  }, []);
+
+  useEffect(() => {
+    loadSlides();
+    loadLastSync();
+    const ch = supabase
+      .channel('admin_slides_realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'display_slides' }, loadSlides)
+      .subscribe();
+    return () => { supabase.removeChannel(ch); };
+  }, [loadSlides, loadLastSync]);
+
+  const syncNow = async () => {
+    setSyncing(true);
+    setMsg('');
+    try {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/sync-slides`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${SUPABASE_ANON}`,
+        },
+        body: '{}',
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        setMsg(`Sync failed: ${data.error || res.status}`);
+      } else {
+        setMsg(`Synced — ${data.added} added, ${data.updated} updated, ${data.removed} removed, ${data.unchanged} unchanged.`);
+      }
+    } catch (e) {
+      setMsg(`Sync error: ${e.message}`);
+    }
+    setSyncing(false);
+    loadSlides();
+    loadLastSync();
+  };
+
+  const fmtTime = (iso) => {
+    if (!iso) return 'never';
+    try { return new Date(iso).toLocaleString(); } catch { return iso; }
+  };
+
+  return (
+    <div className="max-w-3xl mx-auto px-4 py-5">
+      <div className="flex items-center justify-between mb-4 gap-3">
+        <div>
+          <h2 className="font-display text-2xl text-[var(--text)] leading-none">Display Slides</h2>
+          <p className="text-sm text-[var(--text-dim)] mt-1">
+            Slides shown on the taproom TV. Synced from the Google Drive folder.
+          </p>
+        </div>
+        <button
+          onClick={syncNow}
+          disabled={syncing}
+          className="flex-shrink-0 px-4 py-2.5 rounded-lg bg-[var(--hop)] text-[#0a1a02] font-display text-lg tracking-wide hover:brightness-110 disabled:opacity-50 transition">
+          {syncing ? 'Syncing…' : '⟳ Sync now'}
+        </button>
+      </div>
+
+      {msg && (
+        <div className="mb-4 p-3 rounded-lg border border-[var(--line)] text-sm text-[var(--text)] bg-[var(--bg-elev)]">
+          {msg}
+        </div>
+      )}
+
+      <div className="mb-5 text-xs text-[var(--text-faint)] font-mono">
+        Last sync: {fmtTime(lastSync?.at)}
+        {lastSync && ` · ${lastSync.total} slides in folder`}
+      </div>
+
+      {loading ? (
+        <div className="text-[var(--text-faint)] text-sm py-8 text-center">Loading…</div>
+      ) : slides.length === 0 ? (
+        <div className="text-[var(--text-faint)] text-sm py-8 text-center border border-dashed border-[var(--line)] rounded-lg">
+          No slides yet. Hit "Sync now" to pull them from the Drive folder, or
+          check that the folder ID and API key are set up.
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          {slides.map((s) => (
+            <div key={s.id} className="rounded-lg overflow-hidden border border-[var(--line)] bg-black">
+              <img src={s.public_url} alt="" className="w-full aspect-video object-contain bg-black" />
+              <div className="px-2 py-1.5 flex items-center justify-between">
+                <span className="font-mono text-[10px] text-[var(--text-faint)]">#{s.sort_order}</span>
+                <span className="font-mono text-[9px] text-[var(--text-faint)] uppercase">{s.source === 'drive-sync' ? 'Drive' : s.source}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ----------------------------------------------------------------------------
+// ADMIN APP SHELL
+// ----------------------------------------------------------------------------
+function AdminApp() {
+  const [unlocked, setUnlocked] = useState(() => {
+    try { return sessionStorage.getItem('igb_vinyl_admin_unlocked') === '1'; }
+    catch { return false; }
+  });
+  const [view, setView] = useState('scan');
+
+  if (!unlocked) return <PinGate onUnlock={() => setUnlocked(true)} />;
+
+  return (
+    <>
+      <AdminHeader view={view} setView={setView} />
+      {view === 'scan'      && <ScanView />}
+      {view === 'manual'    && <ManualView />}
+      {view === 'inventory' && <InventoryView />}
+      {view === 'wishlist'  && <WishlistAdminView />}
+      {view === 'slides'    && <SlidesView />}
+      <footer className="max-w-3xl mx-auto px-4 py-8 text-center font-mono text-[10px] tracking-[0.2em] uppercase text-[var(--text-faint)]">
+        Inner Groove Brewing · Staff Console
+      </footer>
+    </>
+  );
+}
+
+// ============================================================================
+// APP SHELL
+// ============================================================================
+function App() {
+  const [tab, setTab]             = useState('browse');
+  const [inventory, setInventory] = useState([]);
+  const [loading, setLoading]     = useState(true);
+  const queueEnabled              = useQueueEnabled();
+
+  // Load inventory once on mount
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      // Pagination is unnecessary at 170 rows but future-proofs it
+      const { data, error } = await supabase
+        .from('vinyl_inventory')
+        .select('id, artist, album, year, genres, styles, cover_url, discogs_url, tracklist, sides, status, created_at')
+        .order('artist', { ascending: true });
+      if (!cancelled) {
+        if (error) console.error(error);
+        setInventory(data || []);
+        setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  return (
+    <>
+      <Header tab={tab} setTab={setTab} />
+      {tab === 'browse'   && <BrowseTab inventory={inventory} loading={loading} queueEnabled={queueEnabled} />}
+      {tab === 'wishlist' && <WishlistTab />}
+      <footer className="max-w-5xl mx-auto px-4 py-8 text-center font-mono text-[10px] tracking-[0.2em] uppercase text-[var(--text-faint)]">
+        Inner Groove Brewing · Verona, PA
+      </footer>
+    </>
+  );
+}
+
+// ============================================================================
+// PLAY QUEUE — shared hooks + components
+// ============================================================================
+
+/** Read the queue on/off flag from app_settings, live. */
+function useQueueEnabled() {
+  const [enabled, setEnabled] = useState(null); // null = loading
+
+  const load = useCallback(async () => {
+    const { data, error } = await supabase
+      .from('app_settings')
+      .select('value')
+      .eq('key', 'vinyl_queue_enabled')
+      .single();
+    if (error) { console.error(error); setEnabled(false); return; }
+    setEnabled(data?.value === true || data?.value === 'true');
+  }, []);
+
+  useEffect(() => {
+    load();
+    const ch = supabase
+      .channel('app_settings_realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'app_settings' }, load)
+      .subscribe();
+    return () => { supabase.removeChannel(ch); };
+  }, [load]);
+
+  return enabled;
+}
+
+/** Read the live play queue (queued + playing), newest activity first. */
+function usePlayQueue() {
+  const [queue, setQueue] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    const { data, error } = await supabase
+      .from('vinyl_play_queue')
+      .select('*')
+      .in('status', ['queued', 'playing'])
+      .order('created_at', { ascending: true });
+    if (error) console.error(error);
+    setQueue(data || []);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    load();
+    const ch = supabase
+      .channel('play_queue_realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'vinyl_play_queue' }, load)
+      .subscribe();
+    return () => { supabase.removeChannel(ch); };
+  }, [load]);
+
+  // Sort: playing first, then queued by creation time
+  const sorted = useMemo(() => {
+    const order = { playing: 0, queued: 1 };
+    return [...queue].sort((a, b) => {
+      const d = (order[a.status] ?? 9) - (order[b.status] ?? 9);
+      if (d !== 0) return d;
+      return new Date(a.created_at) - new Date(b.created_at);
+    });
+  }, [queue]);
+
+  return { queue: sorted, loading, reload: load };
+}
+
+// ----------------------------------------------------------------------------
+// RANDOM GROOVE MODAL — slot-machine reel that picks an album from the stacks
+// ----------------------------------------------------------------------------
+function RandomGrooveModal({ inventory, onClose, onLockIn }) {
+  // Pull only records that are available (not damaged/missing) to spin on
+  const pool = useMemo(() => {
+    return inventory.filter((r) => !r.status || r.status === 'available' || r.status === 'featured' || r.status === 'playing');
+  }, [inventory]);
+
+  const [phase, setPhase] = useState('spinning');   // 'spinning' | 'revealed'
+  const [result, setResult] = useState(null);
+  const [reelItems, setReelItems] = useState([]);
+  const [flashKey, setFlashKey] = useState(0);
+
+  // Pick a result + build a long reel of random covers that ends on the result
+  const startSpin = useCallback(() => {
+    if (pool.length === 0) return;
+    const pick = pool[Math.floor(Math.random() * pool.length)];
+    // Build a longer reel for a meatier spin: ~50 random covers, with the
+    // final one being the pick. More covers + longer animation = more drama.
+    const reel = [];
+    for (let i = 0; i < 50; i++) {
+      reel.push(pool[Math.floor(Math.random() * pool.length)]);
+    }
+    reel[reel.length - 1] = pick;       // last item is the chosen one
+    setResult(pick);
+    setReelItems(reel);
+    setPhase('spinning');
+    setFlashKey((k) => k + 1);
+  }, [pool]);
+
+  // Kick off the first spin on mount
+  useEffect(() => { startSpin(); }, [startSpin]);
+
+  // After the reel-spin animation, reveal the result.
+  // CSS animation runs ~4.5s; we transition phase right at the end.
+  useEffect(() => {
+    if (phase !== 'spinning') return;
+    const t = setTimeout(() => setPhase('revealed'), 4550);
+    return () => clearTimeout(t);
+  }, [phase, flashKey]);
+
+  // Esc to close
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  if (pool.length === 0) {
+    return (
+      <div className="fixed inset-0 z-[60] flex items-center justify-center scrim-anim p-4"
+        style={{ background: 'rgba(0,0,0,0.85)' }}
+        onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+        <div className="bg-[var(--bg-elev)] border border-[var(--line)] rounded-2xl p-6 max-w-sm text-center">
+          <div className="font-display text-2xl glow-pulse mb-2">No records to spin</div>
+          <p className="text-sm text-[var(--text-dim)] mb-4">The stacks look empty — try again once records are added.</p>
+          <button onClick={onClose} className="px-4 py-2 rounded-lg border border-[var(--line)]">Close</button>
+        </div>
+      </div>
+    );
+  }
+
+  // The reel cell size — square covers at ~144px on mobile, 180px desktop
+  // Each cell is reel-cell-size tall. The reel translates up by
+  // (reelItems.length - 1) * cellSize so the last cell lands centered.
+  const CELL = 144;     // px (mobile)
+  const distance = (reelItems.length - 1) * CELL;
+
+  return (
+    <div key={flashKey}
+      className={`fixed inset-0 z-[60] flex items-center justify-center p-4 scrim-anim ${phase === 'revealed' ? 'rg-flash-bg' : ''}`}
+      style={{ background: 'rgba(0,0,0,0.88)', backdropFilter: 'blur(6px)' }}
+      onClick={(e) => { if (e.target === e.currentTarget && phase === 'revealed') onClose(); }}>
+      <div className="bg-[var(--bg-elev)] border border-[var(--line)] rounded-2xl w-full max-w-sm p-5 safe-bottom relative overflow-hidden">
+
+        {/* Header */}
+        <div className="text-center mb-4">
+          <div className="font-mono text-[10px] tracking-[0.25em] uppercase text-[var(--text-faint)]">
+            Inner Groove · Fate Decides
+          </div>
+          <h2 className="font-display text-4xl glow-pulse leading-none mt-0.5">
+            Random Groove
+          </h2>
+        </div>
+
+        {/* Reel / Result viewport */}
+        <div className="relative mx-auto mb-5"
+          style={{ width: `${CELL}px`, height: `${CELL}px` }}>
+          {/* Outer frame with hop-green border */}
+          <div className={`absolute inset-0 rounded-xl border-2 border-[var(--hop)] overflow-hidden ${phase === 'revealed' ? 'rg-glow' : ''}`}
+            style={{ boxShadow: '0 0 24px var(--hop-glow)' }}>
+            {/* Spinning reel */}
+            {phase === 'spinning' && reelItems.length > 0 && (
+              <div className="rg-reel"
+                style={{ '--rg-distance': `-${distance}px`, '--rg-duration': '4.5s' }}>
+                {reelItems.map((r, i) => (
+                  <div key={i} className="flex-shrink-0" style={{ width: `${CELL}px`, height: `${CELL}px` }}>
+                    <CoverImage src={r.cover_url} alt="" />
+                  </div>
+                ))}
+              </div>
+            )}
+            {/* Revealed result — replaces the reel so we get a clean bounce */}
+            {phase === 'revealed' && result && (
+              <div className="rg-reveal absolute inset-0" style={{ width: `${CELL}px`, height: `${CELL}px` }}>
+                <CoverImage src={result.cover_url} alt={result.album} />
+              </div>
+            )}
+          </div>
+          {/* Subtle scan-line overlay during spin for that slot-machine feel */}
+          {phase === 'spinning' && (
+            <div className="pointer-events-none absolute inset-0 rounded-xl"
+              style={{ background: 'linear-gradient(to bottom, rgba(0,0,0,0.55) 0%, transparent 30%, transparent 70%, rgba(0,0,0,0.55) 100%)' }} />
+          )}
+        </div>
+
+        {/* Spinning vs revealed footer */}
+        {phase === 'spinning' ? (
+          <div className="text-center">
+            <div className="font-mono text-xs text-[var(--text-faint)] tracking-wider uppercase animate-pulse">
+              Spinning the stacks…
+            </div>
+          </div>
+        ) : (
+          <div className="text-center">
+            <div className="font-mono text-[10px] tracking-[0.25em] uppercase text-[var(--hop)] mb-1">
+              Fate has spoken
+            </div>
+            <div className="font-display text-2xl text-[var(--text)] leading-tight">{clean(result.album)}</div>
+            <div className="text-sm text-[var(--text-dim)] mb-5">{clean(result.artist)}</div>
+
+            <button onClick={() => onLockIn(result)}
+              className="w-full py-3 rounded-lg bg-[var(--hop)] text-[#0a1a02] font-display text-2xl tracking-wider hover:brightness-110 transition shadow-[0_0_24px_var(--hop-glow)]">
+              🔒 Lock it in!
+            </button>
+            <div className="flex gap-2 mt-2">
+              <button onClick={startSpin}
+                className="flex-1 py-2.5 rounded-lg border border-[var(--line)] text-[var(--text)] font-display tracking-wider hover:border-[var(--hop)] hover:text-[var(--hop)] transition">
+                🎲 Spin again
+              </button>
+              <button onClick={onClose}
+                className="flex-1 py-2.5 rounded-lg border border-[var(--line)] text-[var(--text-dim)] hover:text-[var(--text)] transition">
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ----------------------------------------------------------------------------
+// REQUEST-TO-PLAY MODAL (patron) — pick side + name
+// ----------------------------------------------------------------------------
+function RequestToPlayModal({ record, onClose, onRequested }) {
+  const sides = (record.sides && record.sides.length) ? record.sides : ['A', 'B'];
+  const [side, setSide] = useState(sides[0]);
+  const [name, setName] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [err, setErr] = useState('');
+
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const submit = async () => {
+    setErr('');
+    if (!name.trim()) { setErr('Add your first name so we can call it out.'); return; }
+    setSubmitting(true);
+    const { error } = await supabase.from('vinyl_play_queue').insert({
+      inventory_id: record.id,
+      artist:       record.artist,
+      album:        record.album,
+      cover_url:    record.cover_url,
+      side:         side,
+      requested_by: name.trim(),
+    });
+    setSubmitting(false);
+    if (error) { console.error(error); setErr('Could not add to the queue. Try again?'); return; }
+    onRequested?.();
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center scrim-anim"
+      style={{ background: 'rgba(0,0,0,0.82)', backdropFilter: 'blur(4px)' }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="sheet-anim bg-[var(--bg-elev)] border-t sm:border border-[var(--line)] rounded-t-2xl sm:rounded-2xl w-full sm:max-w-sm p-5 safe-bottom">
+        <div className="flex items-start gap-3 mb-4">
+          <div className="w-16 h-16 flex-shrink-0 rounded overflow-hidden">
+            <CoverImage src={record.cover_url} alt={record.album} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="font-display text-xl text-[var(--text)] leading-none">{clean(record.album)}</div>
+            <div className="text-sm text-[var(--text-dim)] mt-0.5">{clean(record.artist)}</div>
+          </div>
+          <button onClick={onClose} className="text-[var(--text-dim)] hover:text-[var(--text)] text-2xl leading-none">×</button>
+        </div>
+
+        <div className="mb-4">
+          <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-faint)]">Which side?</span>
+          <div className="flex gap-2 mt-2 flex-wrap">
+            {sides.map((s) => (
+              <button key={s} onClick={() => setSide(s)}
+                className={`w-12 h-12 rounded-full font-display text-xl transition ${
+                  side === s
+                    ? 'bg-[var(--hop)] text-[#0a1a02] shadow-[0_0_16px_var(--hop-glow)]'
+                    : 'border border-[var(--line)] text-[var(--text-dim)] hover:border-[var(--hop)]'
+                }`}>
+                {s}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <label className="block mb-4">
+          <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-faint)]">Your first name</span>
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Sarah"
+            maxLength={24}
+            className="mt-1 w-full bg-[var(--bg)] border border-[var(--line)] rounded-md px-3 py-2 text-[var(--text)] placeholder:text-[var(--text-faint)] focus:outline-none focus:border-[var(--hop)] focus:ring-1 focus:ring-[var(--hop)]"
+          />
+        </label>
+
+        {err && <div className="text-sm text-red-400 mb-3">{err}</div>}
+
+        <button onClick={submit} disabled={submitting}
+          className="w-full py-3 rounded-lg bg-[var(--hop)] text-[#0a1a02] font-display text-xl tracking-wider hover:brightness-110 disabled:opacity-50 transition shadow-[0_0_20px_var(--hop-glow)]">
+          {submitting ? 'Adding…' : `Request Side ${side}`}
+        </button>
+        <p className="mt-3 text-[10px] text-[var(--text-faint)] leading-relaxed text-center">
+          You can also drop a paper slip at the bar. The bartender plays from the queue when they can.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ----------------------------------------------------------------------------
+// DISPLAY APP — the taproom TV (/display)
+// ----------------------------------------------------------------------------
+function DisplayApp() {
+  const queueEnabled = useQueueEnabled();
+  const { queue } = usePlayQueue();
+  const [slides, setSlides] = useState([]);
+  const [slideIdx, setSlideIdx] = useState(0);
+  const [flash, setFlash] = useState(false);
+  const prevCountRef = useRef(0);
+  const hasLoadedRef = useRef(false);
+
+  // Load slides (will be empty until Drop 2 sync runs — placeholder shows)
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from('display_slides')
+        .select('*')
+        .eq('active', true)
+        .order('sort_order', { ascending: true });
+      if (!cancelled) setSlides(data || []);
+    })();
+    const ch = supabase
+      .channel('slides_realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'display_slides' }, async () => {
+        const { data } = await supabase.from('display_slides').select('*').eq('active', true).order('sort_order', { ascending: true });
+        setSlides(data || []);
+      })
+      .subscribe();
+    return () => { cancelled = true; supabase.removeChannel(ch); };
+  }, []);
+
+  // Advance slides every 8s
+  useEffect(() => {
+    if (slides.length === 0) return;
+    const t = setInterval(() => setSlideIdx((i) => (i + 1) % slides.length), 8000);
+    return () => clearInterval(t);
+  }, [slides.length]);
+
+  // Keep the screen awake (Wake Lock API). Re-acquires if the tab is
+  // backgrounded then refocused (the OS releases the lock on visibility change).
+  useEffect(() => {
+    let wakeLock = null;
+    let released = false;
+
+    const acquire = async () => {
+      try {
+        if ('wakeLock' in navigator) {
+          wakeLock = await navigator.wakeLock.request('screen');
+        }
+      } catch (e) {
+        // Some browsers reject without a user gesture; the re-acquire on
+        // visibilitychange / click usually picks it up shortly after.
+      }
+    };
+
+    const onVisible = () => {
+      if (document.visibilityState === 'visible' && !released) acquire();
+    };
+
+    acquire();
+    document.addEventListener('visibilitychange', onVisible);
+    // Any interaction (e.g. the remote click) is a good moment to (re)acquire
+    document.addEventListener('click', acquire);
+
+    return () => {
+      released = true;
+      document.removeEventListener('visibilitychange', onVisible);
+      document.removeEventListener('click', acquire);
+      if (wakeLock) { try { wakeLock.release(); } catch (e) {} }
+    };
+  }, []);
+
+  // Flash the queue panel when a new item is added
+  useEffect(() => {
+    const queuedCount = queue.filter((q) => q.status === 'queued').length;
+    // On the very first run, just record the count without flashing
+    if (!hasLoadedRef.current) {
+      hasLoadedRef.current = true;
+      prevCountRef.current = queuedCount;
+      return;
+    }
+    // Flash whenever the queued count goes UP (including empty → 1)
+    if (queuedCount > prevCountRef.current) {
+      setFlash(true);
+      const t = setTimeout(() => setFlash(false), 2400);
+      prevCountRef.current = queuedCount;
+      return () => clearTimeout(t);
+    }
+    prevCountRef.current = queuedCount;
+  }, [queue]);
+
+  const showQueue = queueEnabled === true;
+
+  return (
+    <div className="fixed inset-0 bg-[var(--bg)] flex overflow-hidden">
+      {/* Slides panel */}
+      <div className={`relative h-full transition-all duration-700 ${showQueue ? 'w-3/4' : 'w-full'}`}>
+        {slides.length > 0 ? (
+          slides.map((s, i) => (
+            <img key={s.id} src={s.public_url} alt=""
+              className="absolute inset-0 w-full h-full object-contain bg-black transition-opacity duration-1000"
+              style={{ opacity: i === slideIdx ? 1 : 0 }} />
+          ))
+        ) : (
+          // Placeholder until Drop 2 wires in real slides
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-6">
+            <VinylSpinner size={140} />
+            <div className="text-center">
+              <div className="font-display text-5xl glow-pulse">Inner Groove Brewing</div>
+              <div className="font-mono text-sm tracking-[0.3em] uppercase text-[var(--text-faint)] mt-2">
+                Verona · PA
+              </div>
+            </div>
+            <div className="font-mono text-[11px] tracking-[0.2em] uppercase text-[var(--text-faint)] absolute bottom-8">
+              slides go here
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Queue panel */}
+      {showQueue && (
+        <div className={`relative h-full w-1/4 border-l-2 flex flex-col transition-all duration-300 ${
+          flash ? 'border-[var(--hop)] queue-flash-glow' : 'border-[var(--line)]'
+        }`}>
+          <DisplayQueuePanel queue={queue} flash={flash} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// A QR code that renders to canvas via the qrcode CDN lib.
+// Configurable URL so it's easy to point at test vs production.
+const STACKS_QR_URL = 'https://inner-groove-vinyl.vercel.app';
+
+function StacksQR({ size = 180 }) {
+  // QR encodes STACKS_QR_URL, inlined as SVG so it always renders instantly
+  // (no external library or service dependency). To change the URL, regenerate.
+  return (
+    <div className="bg-white rounded-xl p-3 inline-block shadow-[0_0_30px_var(--hop-glow)]">
+      <svg viewBox="0 0 33 33" width={size} height={size}
+        xmlns="http://www.w3.org/2000/svg" shapeRendering="crispEdges">
+        <path d="M2,2H3V3H2zM3,2H4V3H3zM4,2H5V3H4zM5,2H6V3H5zM6,2H7V3H6zM7,2H8V3H7zM8,2H9V3H8zM10,2H11V3H10zM14,2H15V3H14zM16,2H17V3H16zM18,2H19V3H18zM19,2H20V3H19zM20,2H21V3H20zM21,2H22V3H21zM22,2H23V3H22zM24,2H25V3H24zM25,2H26V3H25zM26,2H27V3H26zM27,2H28V3H27zM28,2H29V3H28zM29,2H30V3H29zM30,2H31V3H30zM2,3H3V4H2zM8,3H9V4H8zM10,3H11V4H10zM13,3H14V4H13zM14,3H15V4H14zM16,3H17V4H16zM19,3H20V4H19zM22,3H23V4H22zM24,3H25V4H24zM30,3H31V4H30zM2,4H3V5H2zM4,4H5V5H4zM5,4H6V5H5zM6,4H7V5H6zM8,4H9V5H8zM11,4H12V5H11zM12,4H13V5H12zM15,4H16V5H15zM18,4H19V5H18zM20,4H21V5H20zM22,4H23V5H22zM24,4H25V5H24zM26,4H27V5H26zM27,4H28V5H27zM28,4H29V5H28zM30,4H31V5H30zM2,5H3V6H2zM4,5H5V6H4zM5,5H6V6H5zM6,5H7V6H6zM8,5H9V6H8zM10,5H11V6H10zM11,5H12V6H11zM13,5H14V6H13zM17,5H18V6H17zM18,5H19V6H18zM19,5H20V6H19zM22,5H23V6H22zM24,5H25V6H24zM26,5H27V6H26zM27,5H28V6H27zM28,5H29V6H28zM30,5H31V6H30zM2,6H3V7H2zM4,6H5V7H4zM5,6H6V7H5zM6,6H7V7H6zM8,6H9V7H8zM11,6H12V7H11zM12,6H13V7H12zM13,6H14V7H13zM15,6H16V7H15zM16,6H17V7H16zM17,6H18V7H17zM18,6H19V7H18zM21,6H22V7H21zM24,6H25V7H24zM26,6H27V7H26zM27,6H28V7H27zM28,6H29V7H28zM30,6H31V7H30zM2,7H3V8H2zM8,7H9V8H8zM11,7H12V8H11zM13,7H14V8H13zM16,7H17V8H16zM19,7H20V8H19zM20,7H21V8H20zM21,7H22V8H21zM22,7H23V8H22zM24,7H25V8H24zM30,7H31V8H30zM2,8H3V9H2zM3,8H4V9H3zM4,8H5V9H4zM5,8H6V9H5zM6,8H7V9H6zM7,8H8V9H7zM8,8H9V9H8zM10,8H11V9H10zM12,8H13V9H12zM14,8H15V9H14zM16,8H17V9H16zM18,8H19V9H18zM20,8H21V9H20zM22,8H23V9H22zM24,8H25V9H24zM25,8H26V9H25zM26,8H27V9H26zM27,8H28V9H27zM28,8H29V9H28zM29,8H30V9H29zM30,8H31V9H30zM10,9H11V10H10zM15,9H16V10H15zM16,9H17V10H16zM19,9H20V10H19zM2,10H3V11H2zM4,10H5V11H4zM5,10H6V11H5zM7,10H8V11H7zM8,10H9V11H8zM9,10H10V11H9zM11,10H12V11H11zM12,10H13V11H12zM14,10H15V11H14zM15,10H16V11H15zM16,10H17V11H16zM18,10H19V11H18zM19,10H20V11H19zM20,10H21V11H20zM24,10H25V11H24zM27,10H28V11H27zM29,10H30V11H29zM30,10H31V11H30zM3,11H4V12H3zM6,11H7V12H6zM10,11H11V12H10zM12,11H13V12H12zM18,11H19V12H18zM19,11H20V12H19zM21,11H22V12H21zM24,11H25V12H24zM25,11H26V12H25zM26,11H27V12H26zM30,11H31V12H30zM5,12H6V13H5zM8,12H9V13H8zM10,12H11V13H10zM11,12H12V13H11zM12,12H13V13H12zM14,12H15V13H14zM16,12H17V13H16zM19,12H20V13H19zM28,12H29V13H28zM29,12H30V13H29zM2,13H3V14H2zM3,13H4V14H3zM4,13H5V14H4zM5,13H6V14H5zM6,13H7V14H6zM11,13H12V14H11zM12,13H13V14H12zM13,13H14V14H13zM14,13H15V14H14zM15,13H16V14H15zM16,13H17V14H16zM17,13H18V14H17zM20,13H21V14H20zM21,13H22V14H21zM22,13H23V14H22zM25,13H26V14H25zM30,13H31V14H30zM2,14H3V15H2zM3,14H4V15H3zM6,14H7V15H6zM7,14H8V15H7zM8,14H9V15H8zM13,14H14V15H13zM14,14H15V15H14zM19,14H20V15H19zM23,14H24V15H23zM27,14H28V15H27zM28,14H29V15H28zM2,15H3V16H2zM3,15H4V16H3zM5,15H6V16H5zM9,15H10V16H9zM11,15H12V16H11zM13,15H14V16H13zM14,15H15V16H14zM15,15H16V16H15zM17,15H18V16H17zM21,15H22V16H21zM24,15H25V16H24zM28,15H29V16H28zM29,15H30V16H29zM30,15H31V16H30zM5,16H6V17H5zM7,16H8V17H7zM8,16H9V17H8zM9,16H10V17H9zM13,16H14V17H13zM16,16H17V17H16zM18,16H19V17H18zM20,16H21V17H20zM21,16H22V17H21zM23,16H24V17H23zM26,16H27V17H26zM28,16H29V17H28zM29,16H30V17H29zM30,16H31V17H30zM2,17H3V18H2zM3,17H4V18H3zM4,17H5V18H4zM5,17H6V18H5zM7,17H8V18H7zM10,17H11V18H10zM11,17H12V18H11zM12,17H13V18H12zM15,17H16V18H15zM17,17H18V18H17zM18,17H19V18H18zM20,17H21V18H20zM21,17H22V18H21zM22,17H23V18H22zM25,17H26V18H25zM29,17H30V18H29zM5,18H6V19H5zM6,18H7V19H6zM8,18H9V19H8zM9,18H10V19H9zM10,18H11V19H10zM13,18H14V19H13zM14,18H15V19H14zM17,18H18V19H17zM23,18H24V19H23zM25,18H26V19H25zM26,18H27V19H26zM27,18H28V19H27zM29,18H30V19H29zM3,19H4V20H3zM5,19H6V20H5zM6,19H7V20H6zM7,19H8V20H7zM9,19H10V20H9zM12,19H13V20H12zM14,19H15V20H14zM15,19H16V20H15zM17,19H18V20H17zM19,19H20V20H19zM22,19H23V20H22zM25,19H26V20H25zM27,19H28V20H27zM28,19H29V20H28zM29,19H30V20H29zM2,20H3V21H2zM5,20H6V21H5zM6,20H7V21H6zM8,20H9V21H8zM9,20H10V21H9zM10,20H11V21H10zM11,20H12V21H11zM12,20H13V21H12zM13,20H14V21H13zM14,20H15V21H14zM17,20H18V21H17zM18,20H19V21H18zM19,20H20V21H19zM22,20H23V21H22zM28,20H29V21H28zM5,21H6V22H5zM6,21H7V22H6zM7,21H8V22H7zM10,21H11V22H10zM12,21H13V22H12zM13,21H14V22H13zM14,21H15V22H14zM18,21H19V22H18zM19,21H20V22H19zM21,21H22V22H21zM23,21H24V22H23zM24,21H25V22H24zM26,21H27V22H26zM28,21H29V22H28zM3,22H4V23H3zM4,22H5V23H4zM7,22H8V23H7zM8,22H9V23H8zM9,22H10V23H9zM11,22H12V23H11zM13,22H14V23H13zM14,22H15V23H14zM15,22H16V23H15zM18,22H19V23H18zM19,22H20V23H19zM20,22H21V23H20zM22,22H23V23H22zM23,22H24V23H23zM24,22H25V23H24zM25,22H26V23H25zM26,22H27V23H26zM27,22H28V23H27zM28,22H29V23H28zM10,23H11V24H10zM13,23H14V24H13zM15,23H16V24H15zM16,23H17V24H16zM18,23H19V24H18zM22,23H23V24H22zM26,23H27V24H26zM27,23H28V24H27zM28,23H29V24H28zM29,23H30V24H29zM30,23H31V24H30zM2,24H3V25H2zM3,24H4V25H3zM4,24H5V25H4zM5,24H6V25H5zM6,24H7V25H6zM7,24H8V25H7zM8,24H9V25H8zM10,24H11V25H10zM11,24H12V25H11zM13,24H14V25H13zM14,24H15V25H14zM15,24H16V25H15zM18,24H19V25H18zM20,24H21V25H20zM21,24H22V25H21zM22,24H23V25H22zM24,24H25V25H24zM26,24H27V25H26zM27,24H28V25H27zM29,24H30V25H29zM2,25H3V26H2zM8,25H9V26H8zM10,25H11V26H10zM12,25H13V26H12zM14,25H15V26H14zM17,25H18V26H17zM18,25H19V26H18zM22,25H23V26H22zM26,25H27V26H26zM27,25H28V26H27zM29,25H30V26H29zM30,25H31V26H30zM2,26H3V27H2zM4,26H5V27H4zM5,26H6V27H5zM6,26H7V27H6zM8,26H9V27H8zM11,26H12V27H11zM16,26H17V27H16zM17,26H18V27H17zM19,26H20V27H19zM22,26H23V27H22zM23,26H24V27H23zM24,26H25V27H24zM25,26H26V27H25zM26,26H27V27H26zM28,26H29V27H28zM2,27H3V28H2zM4,27H5V28H4zM5,27H6V28H5zM6,27H7V28H6zM8,27H9V28H8zM10,27H11V28H10zM12,27H13V28H12zM13,27H14V28H13zM15,27H16V28H15zM16,27H17V28H16zM17,27H18V28H17zM18,27H19V28H18zM19,27H20V28H19zM21,27H22V28H21zM23,27H24V28H23zM25,27H26V28H25zM26,27H27V28H26zM27,27H28V28H27zM30,27H31V28H30zM2,28H3V29H2zM4,28H5V29H4zM5,28H6V29H5zM6,28H7V29H6zM8,28H9V29H8zM10,28H11V29H10zM11,28H12V29H11zM13,28H14V29H13zM14,28H15V29H14zM15,28H16V29H15zM16,28H17V29H16zM18,28H19V29H18zM20,28H21V29H20zM22,28H23V29H22zM23,28H24V29H23zM25,28H26V29H25zM28,28H29V29H28zM30,28H31V29H30zM2,29H3V30H2zM8,29H9V30H8zM14,29H15V30H14zM15,29H16V30H15zM16,29H17V30H16zM22,29H23V30H22zM23,29H24V30H23zM25,29H26V30H25zM26,29H27V30H26zM27,29H28V30H27zM29,29H30V30H29zM2,30H3V31H2zM3,30H4V31H3zM4,30H5V31H4zM5,30H6V31H5zM6,30H7V31H6zM7,30H8V31H7zM8,30H9V31H8zM10,30H11V31H10zM11,30H12V31H11zM12,30H13V31H12zM13,30H14V31H13zM16,30H17V31H16zM18,30H19V31H18zM20,30H21V31H20zM21,30H22V31H21zM22,30H23V31H22zM24,30H25V31H24zM25,30H26V31H25zM26,30H27V31H26zM29,30H30V31H29z" fill="#0a0a0a" />
+      </svg>
+    </div>
+  );
+}
+
+function DisplayQueuePanel({ queue, flash }) {
+  const playing = queue.find((q) => q.status === 'playing');
+  const upNext  = queue.filter((q) => q.status === 'queued');
+  const fullyEmpty = !playing && upNext.length === 0;
+
+  // When nothing is playing and nothing is queued, show a big scan-to-request
+  // call to action instead of two separate "nothing here" messages.
+  if (fullyEmpty) {
+    return (
+      <div className={`flex flex-col h-full bg-[var(--bg-elev)] ${flash ? 'queue-flash' : ''}`}>
+        {/* Header */}
+        <div className="px-5 pt-5 pb-3 border-b border-[var(--line)]">
+          <div className="font-mono text-[10px] tracking-[0.25em] uppercase text-[var(--text-faint)]">
+            Inner Groove · Now Spinning
+          </div>
+          <h1 className="font-display text-3xl leading-none mt-1 text-[var(--hop)]">
+            The Queue
+          </h1>
+        </div>
+        {/* Empty-state QR call to action */}
+        <div className="flex-1 flex flex-col items-center justify-center px-5 text-center gap-5">
+          <div className="font-display text-3xl text-[var(--text)] leading-none glow-pulse">
+            Spin a record
+          </div>
+          <StacksQR size={180} />
+          <div>
+            <div className="font-display text-2xl text-[var(--hop)] leading-none">Scan to browse</div>
+            <div className="text-sm text-[var(--text-dim)] mt-1.5 leading-snug">
+              Pick any record in The Stacks and<br />request it on the big screen.
+            </div>
+          </div>
+        </div>
+        {/* Footer */}
+        <div className="px-5 py-3 border-t border-[var(--line)] text-center">
+          <div className="font-mono text-[9px] tracking-[0.15em] uppercase text-[var(--text-faint)]">
+            inner-groove-vinyl.vercel.app
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`flex flex-col h-full bg-[var(--bg-elev)] ${flash ? 'queue-flash' : ''}`}>
+      {/* Header */}
+      <div className="px-5 pt-5 pb-3 border-b border-[var(--line)]">
+        <div className="font-mono text-[10px] tracking-[0.25em] uppercase text-[var(--text-faint)]">
+          Inner Groove · Now Spinning
+        </div>
+        <h1 className={`font-display text-3xl leading-none mt-1 ${flash ? 'glow-pulse' : 'text-[var(--hop)]'}`}>
+          The Queue
+        </h1>
+      </div>
+
+      {/* Now playing */}
+      <div className="px-5 py-4 border-b border-[var(--line)]">
+        <div className="font-mono text-[10px] tracking-[0.25em] uppercase text-[var(--hop)] mb-2">
+          ◉ On the deck
+        </div>
+        {playing ? (
+          <div>
+            <div className="flex items-center gap-3">
+              <div className="w-20 h-20 flex-shrink-0 rounded overflow-hidden shadow-[0_0_24px_var(--hop-glow)]">
+                <CoverImage src={playing.cover_url} alt={playing.album} />
+              </div>
+              <div className="flex-1" />
+              {playing.side && (
+                <span className="flex-shrink-0 inline-flex flex-col items-center justify-center w-16 h-16 rounded-md bg-[var(--hop)] text-[#0a1a02] leading-none shadow-[0_0_16px_var(--hop-glow)]">
+                  <span className="font-mono text-[9px] tracking-wider">SIDE</span>
+                  <span className="font-display text-3xl">{playing.side}</span>
+                </span>
+              )}
+            </div>
+            <div className="mt-2">
+              <div className="font-display text-2xl text-[var(--text)] leading-tight">{clean(playing.album)}</div>
+              <div className="text-base text-[var(--text-dim)] leading-tight">{clean(playing.artist)}</div>
+              {playing.requested_by && (
+                <div className="font-mono text-xs text-[var(--hop)] mt-1">for {playing.requested_by}</div>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="text-[var(--text-faint)] text-sm italic">Nothing playing right now</div>
+        )}
+      </div>
+
+      {/* Up next */}
+      <div className="flex-1 overflow-y-auto px-5 py-4">
+        <div className="font-mono text-[10px] tracking-[0.25em] uppercase text-[var(--text-faint)] mb-3">
+          Up next · {upNext.length}
+        </div>
+        {upNext.length === 0 ? (
+          <div className="text-[var(--text-faint)] text-sm italic">
+            Queue's open — scan to request a record.
+          </div>
+        ) : (
+          <ul className="space-y-2">
+            {upNext.map((q, i) => (
+              <li key={q.id}
+                className={`flex items-center gap-3 rounded-lg border border-[var(--line)] bg-[var(--bg)] px-3 py-2.5 ${i === 0 && flash ? 'fade-rise' : ''}`}>
+                <div className="font-display text-2xl text-[var(--text-faint)] w-6 text-center tabular-nums flex-shrink-0">{i + 1}</div>
+                <div className="flex-1 min-w-0">
+                  <div className="font-semibold text-base text-[var(--text)] leading-tight line-clamp-2">{clean(q.album)}</div>
+                  <div className="text-sm text-[var(--text-dim)] leading-tight truncate">{clean(q.artist)}{q.requested_by ? ` · ${q.requested_by}` : ''}</div>
+                </div>
+                {q.side && (
+                  <span className="flex-shrink-0 inline-flex flex-col items-center justify-center w-11 h-11 rounded-md border-2 border-[var(--hop)] text-[var(--hop)] leading-none">
+                    <span className="font-mono text-[8px] tracking-wider">SIDE</span>
+                    <span className="font-display text-2xl">{q.side}</span>
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      {/* Footer — persistent scan-to-request QR */}
+      <div className="flex items-center gap-3 px-5 py-3 border-t border-[var(--line)]">
+        <StacksQR size={64} />
+        <div className="flex-1 min-w-0 text-left">
+          <div className="font-display text-xl text-[var(--hop)] leading-none">Scan to request</div>
+          <div className="font-mono text-[9px] tracking-[0.15em] uppercase text-[var(--text-faint)] mt-1 truncate">
+            inner-groove-vinyl.vercel.app
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ----------------------------------------------------------------------------
+// Inline PIN gate for the Scan / Add-manually tabs on the bar page. Reuses the
+// staff ADMIN_PIN and the same sessionStorage unlock flag as /admin.
+// ----------------------------------------------------------------------------
+function BarAddGate({ onUnlock }) {
+  const [pin, setPin] = useState('');
+  const [err, setErr] = useState('');
+  const [shake, setShake] = useState(false);
+
+  const submit = (e) => {
+    e?.preventDefault?.();
+    if (pin === BAR_ADD_PIN) {
+      try { sessionStorage.setItem('igb_vinyl_bar_unlocked', '1'); } catch {}
+      onUnlock();
+    } else {
+      setErr('Wrong PIN');
+      setShake(true);
+      setTimeout(() => setShake(false), 400);
+      setPin('');
+    }
+  };
+
+  return (
+    <div className="max-w-xs mx-auto px-4 py-10">
+      <form onSubmit={submit} className={shake ? 'vote-bump' : ''}>
+        <div className="text-center mb-5">
+          <div className="font-mono text-[10px] tracking-[0.25em] text-[var(--text-faint)] uppercase mb-1">
+            Staff Only
+          </div>
+          <h2 className="font-display text-2xl glow-pulse leading-none">Enter PIN to add records</h2>
+        </div>
+        <input
+          type="password"
+          inputMode="numeric"
+          autoFocus
+          value={pin}
+          onChange={(e) => { setPin(e.target.value); setErr(''); }}
+          placeholder="PIN"
+          className="w-full text-center font-mono text-2xl bg-[var(--bg-elev)] border border-[var(--line)] rounded-lg px-4 py-3 text-[var(--text)] placeholder:text-[var(--text-faint)] focus:outline-none focus:border-[var(--hop)] focus:ring-1 focus:ring-[var(--hop)] tracking-[0.5em]"
+        />
+        {err && <div className="text-center text-sm text-red-400 mt-2">{err}</div>}
+        <button
+          type="submit"
+          className="mt-4 w-full py-3 rounded-lg bg-[var(--hop)] text-[#0a1a02] font-display text-xl tracking-wider hover:brightness-110 transition shadow-[0_0_24px_var(--hop-glow)]"
+        >
+          Unlock
+        </button>
+      </form>
+    </div>
+  );
+}
+
+// ----------------------------------------------------------------------------
+// SPORTS ON TV — daily board for the bartender console (/bar)
+// Reads the sports_tv_today table (populated by the sync-sports Edge Function).
+// ----------------------------------------------------------------------------
+const LEAGUE_LABEL = { mlb: 'MLB', nhl: 'NHL', nfl: 'NFL', cfb: 'CFB', cbb: 'CBB', nba: 'NBA' };
+
+function etTodayStr() {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date());
+}
+
+function fmtEastern(iso) {
+  try {
+    return new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit',
+    }).format(new Date(iso));
+  } catch { return ''; }
+}
+
+function SportsTvView() {
+  const [games, setGames] = useState(null); // null = loading
+
+  const load = useCallback(async () => {
+    const { data, error } = await supabase
+      .from('sports_tv_today')
+      .select('*')
+      .eq('game_date', etTodayStr())
+      .order('is_local', { ascending: false })
+      .order('start_time', { ascending: true });
+    if (error) { console.error(error); setGames([]); return; }
+    setGames(data || []);
+  }, []);
+
+  useEffect(() => {
+    load();
+    const ch = supabase
+      .channel('sports_tv_realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'sports_tv_today' }, load)
+      .subscribe();
+    const t = setInterval(load, 5 * 60 * 1000); // backstop refresh for LIVE/Final
+    return () => { supabase.removeChannel(ch); clearInterval(t); };
+  }, [load]);
+
+  return (
+    <div className="max-w-2xl mx-auto px-4 py-4">
+      <div className="flex items-baseline justify-between mb-4">
+        <div className="font-mono text-[10px] tracking-[0.25em] uppercase text-[var(--hop)]">On TV today</div>
+        <div className="font-mono text-[10px] text-[var(--text-faint)]">Comcast · Pittsburgh</div>
+      </div>
+
+      {games === null ? (
+        <div className="flex items-center justify-center py-12"><VinylSpinner /></div>
+      ) : games.length === 0 ? (
+        <div className="text-[var(--text-faint)] text-sm italic py-10 text-center border border-dashed border-[var(--line)] rounded-lg">
+          No tracked games on TV today.
+        </div>
+      ) : (
+        <ul className="space-y-2">
+          {games.map((g) => {
+            const live  = g.status === 'in';
+            const final = g.status === 'post';
+            return (
+              <li key={g.id}
+                className={`flex items-center gap-3 p-3 rounded-lg border ${
+                  g.is_local
+                    ? 'border-[var(--hop-deep)] bg-[#6dc1350a]'
+                    : 'border-[var(--line)] bg-[var(--bg-elev)]'
+                }`}>
+                <div className="font-mono text-[10px] tracking-wider text-[var(--text-faint)] w-9 text-center flex-shrink-0">
+                  {LEAGUE_LABEL[g.league] || (g.league || '').toUpperCase()}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-[var(--text)] text-sm leading-tight truncate">
+                    <span className={g.is_local ? 'font-semibold' : ''}>{g.away_team}</span>
+                    <span className="text-[var(--text-faint)]"> @ </span>
+                    <span className={g.is_local ? 'font-semibold' : ''}>{g.home_team}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 mt-1">
+                    {g.is_local && (
+                      <span className="inline-flex items-center px-1.5 h-5 rounded bg-[var(--hop)] text-[#0a1a02] font-display text-xs leading-none tracking-wide">LOCAL</span>
+                    )}
+                    {g.network && (
+                      <span className="font-mono text-[10px] text-[var(--text-dim)] truncate">
+                        {g.network}{g.channel ? ` · ch ${g.channel}` : ''}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div className="flex-shrink-0 text-right">
+                  {live ? (
+                    <span className="inline-flex items-center gap-1 font-display text-lg text-red-400">
+                      <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" /> LIVE
+                    </span>
+                  ) : final ? (
+                    <span className="font-display text-lg text-[var(--text-faint)]">Final</span>
+                  ) : (
+                    <div>
+                      <span className="font-display text-lg text-[var(--text)]">{fmtEastern(g.start_time)}</span>
+                      <div className="font-mono text-[9px] text-[var(--text-faint)] uppercase tracking-wider -mt-0.5">ET</div>
+                    </div>
+                  )}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+
+      <div className="mt-4 text-center font-mono text-[9px] text-[var(--text-faint)] tracking-wider">
+        Schedule via ESPN · channels may vary
+      </div>
+    </div>
+  );
+}
+
+// BAR APP — bartender queue manager (/bar); Queue is open, Add tabs are PIN-gated
+// ----------------------------------------------------------------------------
+// ----------------------------------------------------------------------------
+// START OF SHIFT — clock-in walkthrough + in-app guide popups (/bar)
+// SHIFT_GUIDES point at the static HTML guides published under /guides/.
+// EDIT these URLs to match the filenames you upload to the repo's guides/ folder.
+// ----------------------------------------------------------------------------
+const SHIFT_GUIDES = {
+  tv:    { label: 'TV / Display Setup', url: '/guides/tv-setup.html' },
+  quick: { label: 'Quick Guide',        url: '/guides/quick-guide.html' },
+  full:  { label: 'Full Guide',         url: '/guides/full-guide.html' },
+  card:  { label: 'Bar Card',           url: '/guides/bar-card.html' },
+};
+
+// Popup that shows a published guide in an on-screen modal (iframe).
+function GuideModal({ guide, onClose }) {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.removeEventListener('keydown', onKey); document.body.style.overflow = prev; };
+  }, [onClose]);
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-stretch sm:items-center justify-center scrim-anim"
+      style={{ background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(4px)' }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="relative bg-[var(--bg-elev)] border border-[var(--line)] sm:rounded-2xl w-full sm:max-w-3xl h-full sm:h-[88vh] flex flex-col overflow-hidden">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--line)] flex-shrink-0">
+          <div className="font-display text-xl text-[var(--text)]">{guide.label}</div>
+          <div className="flex items-center gap-3">
+            <a href={guide.url} target="_blank" rel="noopener noreferrer"
+              className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-dim)] hover:text-[var(--hop)] transition">Open ↗</a>
+            <button onClick={onClose} aria-label="Close"
+              className="w-9 h-9 flex items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/80 transition">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 6l12 12M6 18L18 6" />
+              </svg>
+            </button>
+          </div>
+        </div>
+        <iframe src={guide.url} title={guide.label} className="flex-1 w-full bg-white" />
+      </div>
+    </div>
+  );
+}
+
+// The clock-in walkthrough itself.
+function StartOfShiftModal({ onClose, onOpenGuide }) {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.removeEventListener('keydown', onKey); document.body.style.overflow = prev; };
+  }, [onClose]);
+
+  const steps = [
+    {
+      n: 1, title: 'Power on the displays',
+      body: 'Turn on the taproom TVs. On each display device, open the browser to the /display screen. First-time setup or a blank TV? Open the TV / Display guide.',
+      guide: 'tv',
+    },
+    {
+      n: 2, title: 'Turn the queue ON',
+      body: 'On this tablet, go to the Queue tab and flip the master toggle to ON. While the queue is off, the TVs show slides only and guests can\u2019t send requests.',
+      guide: 'quick',
+    },
+    {
+      n: 3, title: 'Monitor the queue here',
+      body: 'Keep this tablet on the Queue tab during your shift. Tap Play when a record goes on, Done when it finishes, Skip to clear one. New requests appear live.',
+      guide: 'full',
+    },
+  ];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center scrim-anim"
+      style={{ background: 'rgba(0,0,0,0.82)', backdropFilter: 'blur(4px)' }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="sheet-anim relative bg-[var(--bg-elev)] border-t sm:border border-[var(--line)] rounded-t-2xl sm:rounded-2xl w-full sm:max-w-lg max-h-[92vh] overflow-y-auto safe-bottom">
+        <button onClick={onClose} aria-label="Close"
+          className="absolute top-3 right-3 z-10 w-9 h-9 flex items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/80 transition">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6 6l12 12M6 18L18 6" />
+          </svg>
+        </button>
+
+        <div className="px-5 pt-5 pb-3">
+          <div className="font-mono text-[10px] tracking-[0.25em] uppercase text-[var(--text-faint)] mb-1">IGB · Bartender</div>
+          <h2 className="font-display text-3xl glow-pulse leading-none">Start of shift</h2>
+          <p className="text-sm text-[var(--text-dim)] mt-2">Three quick steps to get the room going.</p>
+        </div>
+
+        <div className="px-5 pb-4 space-y-3">
+          {steps.map((s) => (
+            <div key={s.n} className="flex gap-3 p-3 rounded-lg border border-[var(--line)] bg-[var(--bg-card)]">
+              <div className="flex-shrink-0 w-8 h-8 rounded-full bg-[var(--hop)] text-[#0a1a02] font-display text-xl flex items-center justify-center leading-none">{s.n}</div>
+              <div className="flex-1 min-w-0">
+                <div className="font-display text-xl text-[var(--text)] leading-none mb-1">{s.title}</div>
+                <p className="text-sm text-[var(--text-dim)] leading-snug">{s.body}</p>
+                {s.guide && SHIFT_GUIDES[s.guide] && (
+                  <button onClick={() => onOpenGuide(SHIFT_GUIDES[s.guide])}
+                    className="mt-2 inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider px-2.5 py-1 rounded border border-[var(--line)] text-[var(--text-dim)] hover:border-[var(--hop)] hover:text-[var(--hop)] transition">
+                    📄 {SHIFT_GUIDES[s.guide].label}
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="px-5 pb-5">
+          <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--text-faint)] mb-2">All guides</div>
+          <div className="flex flex-wrap gap-2">
+            {Object.values(SHIFT_GUIDES).map((g) => (
+              <button key={g.url} onClick={() => onOpenGuide(g)}
+                className="inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider px-3 py-1.5 rounded border border-[var(--line)] text-[var(--text-dim)] hover:border-[var(--hop)] hover:text-[var(--hop)] transition">
+                {g.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="px-5 pb-6">
+          <button onClick={onClose}
+            className="w-full py-3 rounded-lg bg-[var(--hop)] text-[#0a1a02] font-display text-2xl tracking-wider hover:brightness-110 transition shadow-[0_0_24px_var(--hop-glow)]">
+            Let&rsquo;s go
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BarApp() {
+  const queueEnabled = useQueueEnabled();
+  const { queue, reload } = usePlayQueue();
+  const [history, setHistory] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [view, setView] = useState('queue'); // 'queue' | 'scan' | 'manual'
+  const [addUnlocked, setAddUnlocked] = useState(() => {
+    try { return sessionStorage.getItem('igb_vinyl_bar_unlocked') === '1'; }
+    catch { return false; }
+  });
+  const [startOpen, setStartOpen] = useState(false);
+  const [activeGuide, setActiveGuide] = useState(null);
+
+  // Load recently-played for context
+  const loadHistory = useCallback(async () => {
+    const { data } = await supabase
+      .from('vinyl_play_queue')
+      .select('*')
+      .in('status', ['done', 'skipped'])
+      .order('played_at', { ascending: false })
+      .limit(8);
+    setHistory(data || []);
+  }, []);
+  useEffect(() => { loadHistory(); }, [loadHistory, queue]);
+
+  const toggleQueue = async () => {
+    setBusy(true);
+    const next = !(queueEnabled === true);
+    const { error } = await supabase
+      .from('app_settings')
+      .update({ value: next })
+      .eq('key', 'vinyl_queue_enabled');
+    setBusy(false);
+    if (error) alert(error.message);
+  };
+
+  const setStatus = async (item, status) => {
+    const patch = { status };
+    if (status === 'playing' || status === 'done') patch.played_at = new Date().toISOString();
+    const { error } = await supabase.from('vinyl_play_queue').update(patch).eq('id', item.id);
+    if (error) { alert(error.message); return; }
+    reload();
+  };
+
+  const clearDone = async () => {
+    if (!confirm('Clear all played/skipped items from history?')) return;
+    await supabase.from('vinyl_play_queue').delete().in('status', ['done', 'skipped']);
+    loadHistory();
+  };
+
+  const playing = queue.find((q) => q.status === 'playing');
+  const upNext  = queue.filter((q) => q.status === 'queued');
+
+  return (
+    <div className="min-h-screen bg-[var(--bg)]">
+      <header className="sticky top-0 z-40 bg-[var(--bg)]/90 backdrop-blur-md border-b border-[var(--line)]">
+        <div className="max-w-2xl mx-auto px-4 pt-3 pb-0">
+          <div className="flex items-center justify-between">
+            <div className="font-mono text-[10px] tracking-[0.25em] uppercase text-[var(--text-faint)]">
+              IGB · Bartender
+            </div>
+            <button onClick={() => setStartOpen(true)}
+              className="font-mono text-[10px] uppercase tracking-wider px-2.5 py-1 rounded border border-[var(--line)] text-[var(--text-dim)] hover:border-[var(--hop)] hover:text-[var(--hop)] transition">
+              ▶ Start of shift
+            </button>
+          </div>
+          <h1 className="font-display text-3xl glow-pulse leading-none mb-3">Vinyl Queue</h1>
+          <nav className="flex gap-5 -mb-px overflow-x-auto">
+            {[
+              ['queue',  'Queue'],
+              ['scan',   'Scan'],
+              ['manual', 'Add manually'],
+              ['ontv',   'On TV'],
+            ].map(([k, label]) => (
+              <button
+                key={k}
+                onClick={() => setView(k)}
+                className={`font-display text-lg pb-2 px-1 transition-colors whitespace-nowrap ${
+                  view === k ? 'tab-active' : 'text-[var(--text-dim)] hover:text-[var(--text)]'
+                }`}>
+                {label}
+              </button>
+            ))}
+          </nav>
+        </div>
+      </header>
+
+      {view === 'scan'   && (addUnlocked ? <ScanView />   : <BarAddGate onUnlock={() => setAddUnlocked(true)} />)}
+      {view === 'manual' && (addUnlocked ? <ManualView /> : <BarAddGate onUnlock={() => setAddUnlocked(true)} />)}
+      {view === 'ontv'   && <SportsTvView />}
+
+      {startOpen && <StartOfShiftModal onClose={() => setStartOpen(false)} onOpenGuide={setActiveGuide} />}
+      {activeGuide && <GuideModal guide={activeGuide} onClose={() => setActiveGuide(null)} />}
+
+      {view === 'queue' && (
+      <div className="max-w-2xl mx-auto px-4 py-4">
+        {/* Master toggle */}
+        <button
+          onClick={toggleQueue}
+          disabled={busy || queueEnabled === null}
+          className={`w-full mb-5 py-4 rounded-xl font-display text-2xl tracking-wider transition ${
+            queueEnabled === true
+              ? 'bg-[var(--hop)] text-[#0a1a02] shadow-[0_0_28px_var(--hop-glow)]'
+              : 'border-2 border-[var(--line)] text-[var(--text-dim)]'
+          }`}>
+          {queueEnabled === null ? 'Loading…' : queueEnabled ? '● QUEUE IS ON — tap to turn off' : '○ QUEUE IS OFF — tap to turn on'}
+        </button>
+
+        {queueEnabled === false && (
+          <div className="mb-5 p-3 rounded-lg border border-[var(--line)] text-[var(--text-faint)] text-sm text-center">
+            While off: the TV shows slides full-screen and patrons can't add requests.
+          </div>
+        )}
+
+        {/* Now playing */}
+        <div className="mb-5">
+          <div className="font-mono text-[10px] tracking-[0.25em] uppercase text-[var(--hop)] mb-2">◉ On the deck</div>
+          {playing ? (
+            <div className="flex items-center gap-3 p-3 rounded-lg border border-[var(--hop-deep)] bg-[#6dc1350a]">
+              <div className="w-14 h-14 flex-shrink-0 rounded overflow-hidden">
+                <CoverImage src={playing.cover_url} alt={playing.album} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="font-semibold text-[var(--text)] truncate">{clean(playing.album)}</div>
+                <div className="text-sm text-[var(--text-dim)] truncate">{clean(playing.artist)}</div>
+                <div className="flex items-center gap-2 mt-1">
+                  {playing.side && (
+                    <span className="inline-flex items-center px-2 h-6 rounded bg-[var(--hop)] text-[#0a1a02] font-display text-base leading-none">
+                      SIDE {playing.side}
+                    </span>
+                  )}
+                  {playing.requested_by && (
+                    <span className="font-mono text-[10px] text-[var(--text-dim)] truncate">for {playing.requested_by}</span>
+                  )}
+                </div>
+              </div>
+              <button onClick={() => setStatus(playing, 'done')}
+                className="px-5 py-3 rounded-lg bg-[var(--hop)] text-[#0a1a02] font-display text-lg tracking-wider active:brightness-90">
+                Done
+              </button>
+            </div>
+          ) : (
+            <div className="text-[var(--text-faint)] text-sm italic p-3 border border-dashed border-[var(--line)] rounded-lg text-center">
+              Nothing on the deck. Tap "Play" on a queued record below.
+            </div>
+          )}
+        </div>
+
+        {/* Up next */}
+        <div className="font-mono text-[10px] tracking-[0.25em] uppercase text-[var(--text-faint)] mb-2">
+          Up next · {upNext.length}
+        </div>
+        {upNext.length === 0 ? (
+          <div className="text-[var(--text-faint)] text-sm italic py-6 text-center">No requests in the queue.</div>
+        ) : (
+          <ul className="space-y-2">
+            {upNext.map((q, i) => (
+              <li key={q.id} className="flex items-center gap-3 p-3 rounded-lg border border-[var(--line)] bg-[var(--bg-elev)]">
+                <div className="font-display text-2xl text-[var(--text-faint)] w-7 text-center tabular-nums">{i + 1}</div>
+                <div className="w-14 h-14 flex-shrink-0 rounded overflow-hidden">
+                  <CoverImage src={q.cover_url} alt={q.album} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="font-semibold text-[var(--text)] text-sm leading-tight line-clamp-2">{clean(q.album)}</div>
+                  <div className="text-xs text-[var(--text-dim)] truncate">{clean(q.artist)}</div>
+                  <div className="flex items-center gap-1.5 mt-1">
+                    {q.side && (
+                      <span className="inline-flex items-center px-1.5 h-5 rounded bg-[var(--hop)] text-[#0a1a02] font-display text-sm leading-none">
+                        SIDE {q.side}
+                      </span>
+                    )}
+                    {q.requested_by && (
+                      <span className="font-mono text-[10px] text-[var(--text-faint)] truncate">{q.requested_by}</span>
+                    )}
+                  </div>
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <button onClick={() => setStatus(q, 'playing')}
+                    className="px-4 py-2.5 rounded-lg bg-[var(--hop)] text-[#0a1a02] font-display text-base tracking-wide active:brightness-90">
+                    Play
+                  </button>
+                  <button onClick={() => setStatus(q, 'skipped')}
+                    className="px-4 py-1.5 rounded-lg border border-[var(--line)] text-[var(--text-faint)] font-mono text-[10px] uppercase tracking-wider active:border-red-700 active:text-red-400">
+                    Skip
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {/* History */}
+        {history.length > 0 && (
+          <div className="mt-8">
+            <div className="flex items-center justify-between mb-2">
+              <div className="font-mono text-[10px] tracking-[0.25em] uppercase text-[var(--text-faint)]">Recently played</div>
+              <button onClick={clearDone} className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-faint)] hover:text-red-400">Clear</button>
+            </div>
+            <ul className="space-y-1">
+              {history.map((h) => (
+                <li key={h.id} className="flex items-center gap-2 text-xs text-[var(--text-faint)] py-1">
+                  <span className={`font-mono text-[9px] uppercase ${h.status === 'skipped' ? 'text-red-500/70' : 'text-[var(--hop)]/70'}`}>
+                    {h.status === 'skipped' ? 'skip' : 'done'}
+                  </span>
+                  <span className="truncate">{clean(h.album)} — {clean(h.artist)}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+      )}
+    </div>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+
+// Route based on URL path. Vercel rewrites /admin → /index.html so we can
+// inspect window.location.pathname to decide which app to render.
+const path = window.location.pathname.replace(/\/$/, '');
+let RootComponent;
+if (path === '/admin')        RootComponent = AdminApp;
+else if (path === '/display') RootComponent = DisplayApp;
+else if (path === '/bar')     RootComponent = BarApp;
+else                          RootComponent = App;
+root.render(<RootComponent />);
+</script>
+</body>
+</html>
